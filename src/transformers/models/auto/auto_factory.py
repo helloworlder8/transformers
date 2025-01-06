@@ -692,12 +692,12 @@ class _BaseAutoModelClass:
         config = kwargs.pop("config", None)
         trust_remote_code = kwargs.pop("trust_remote_code", None)
         kwargs["_from_auto"] = True
-
+        code_revision = kwargs.pop("code_revision", None)
+        
         # Handle hub kwargs
         hub_kwargs, token = cls.handle_hub_kwargs(kwargs)
 
         # Resolve commit hash
-        code_revision = kwargs.pop("code_revision", None)
         commit_hash = kwargs.pop("_commit_hash", None)
         commit_hash = cls.resolve_commit_hash(config, model_name_or_path, commit_hash, hub_kwargs)
 
@@ -711,7 +711,7 @@ class _BaseAutoModelClass:
         if not isinstance(config, PretrainedConfig):
             config, kwargs = cls.load_config(
                 model_name_or_path, kwargs, hub_kwargs, commit_hash, trust_remote_code, code_revision
-            )
+            ) #模型 kwargs commit_hash -》 GroundingDinoConfig
 
         # Determine the model class
         model_class = cls.determine_model_class(

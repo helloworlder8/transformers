@@ -60,7 +60,7 @@ PROCESSOR_MAPPING_NAMES = OrderedDict(
         ("flava", "FlavaProcessor"),
         ("fuyu", "FuyuProcessor"),
         ("git", "GitProcessor"),
-        ("grounding-dino", "GroundingDinoProcessor"),
+        ("grounding-dino", "GroundingDinoProcessor"), #GroundingDinoProcessor
         ("groupvit", "CLIPProcessor"),
         ("hubert", "Wav2Vec2Processor"),
         ("idefics", "IdeficsProcessor"),
@@ -121,7 +121,7 @@ PROCESSOR_MAPPING = _LazyAutoMapping(CONFIG_MAPPING_NAMES, PROCESSOR_MAPPING_NAM
 def Instantiation_processor_class(class_name: str):
     for module_name, processors in PROCESSOR_MAPPING_NAMES.items():
         if class_name in processors:
-            module_name = model_type_to_module_name(module_name)
+            module_name = model_type_to_module_name(module_name) # str = grounding_dino
 
             module = importlib.import_module(f".{module_name}", "transformers.models") #+'qwen2_audio'
             try:
@@ -449,11 +449,11 @@ class AutoProcessor:
 
         # 如果找到了处理器类，通过类名加载它
         if processor_class is not None:
-            processor_class = Instantiation_processor_class(processor_class) #实例化
+            processor_class = Instantiation_processor_class(processor_class) #探寻内存空间
 
         # 判断是否存在远程代码支持
-        has_remote_code = processor_auto_map is not None #没有远程代码
-        has_local_code = processor_class is not None or type(config) in PROCESSOR_MAPPING #有本地代码  
+        has_remote_code = processor_auto_map!=None #没有远程代码
+        has_local_code = processor_class!=None or type(config) in PROCESSOR_MAPPING #有本地代码  
 
         # 决定是否信任远程代码
         trust_remote_code = resolve_trust_remote_code( #本地有就不相信远程了
@@ -461,7 +461,7 @@ class AutoProcessor:
         )
 
         # 如果有远程代码并且信任，加载远程处理器类
-        if has_remote_code and trust_remote_code:
+        if has_remote_code and trust_remote_code: #远程的形式
             processor_class = get_class_from_dynamic_module(
                 processor_auto_map, model_name_or_path, **kwargs
             )
@@ -474,7 +474,7 @@ class AutoProcessor:
 
         # 如果有本地处理器类，直接加载
         elif processor_class is not None:
-            return processor_class.from_pretrained(
+            return processor_class.from_pretrained( #最重点，处理器类的实例化
                 model_name_or_path, trust_remote_code=trust_remote_code, **kwargs
             )
 

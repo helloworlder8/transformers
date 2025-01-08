@@ -133,12 +133,12 @@ class GroundingDinoProcessor(ProcessorMixin): #简单理解为前处理和后处
 
         # Get only text
         if images is not None:
-            encoding_image_processor = self.image_processor(images, **output_kwargs["images_kwargs"])
+            encoding_image_processor = self.image_processor(images, **output_kwargs["images_kwargs"]) #输入图像以及 图像处理需要的参数
         else:
             encoding_image_processor = BatchFeature()
 
         if text is not None:
-            text_encoding = self.tokenizer(
+            text_encoding = self.tokenizer( #文本编码
                 text=text,
                 **output_kwargs["text_kwargs"],
             )
@@ -147,7 +147,7 @@ class GroundingDinoProcessor(ProcessorMixin): #简单理解为前处理和后处
 
         text_encoding.update(encoding_image_processor)
 
-        return text_encoding
+        return text_encoding #input_ids token_type_ids attention_mask pixel_values pixel_mask
 
     # Copied from transformers.models.blip.processing_blip.BlipProcessor.batch_decode with BertTokenizerFast->PreTrainedTokenizer
     def batch_decode(self, *args, **kwargs):
@@ -200,19 +200,19 @@ class GroundingDinoProcessor(ProcessorMixin): #简单理解为前处理和后处
             `List[Dict]`: A list of dictionaries, each dictionary containing the scores, labels and boxes for an image
             in the batch as predicted by the model.
         """
-        logits, boxes = outputs.logits, outputs.pred_boxes
+        outputs_classes, outputs_coords = outputs.outputs_classes, outputs.outputs_coords
 
         if target_sizes is not None:
-            if len(logits) != len(target_sizes):
+            if len(outputs_classes) != len(target_sizes):
                 raise ValueError(
                     "Make sure that you pass in as many target sizes as the batch dimension of the logits"
                 )
 
-        probs = torch.sigmoid(logits)  # (batch_size, num_queries, 256)
+        probs = torch.sigmoid(outputs_classes)  # (batch_size, num_queries, 256)
         scores = torch.max(probs, dim=-1)[0]  # (batch_size, num_queries)
 
         # Convert to [x0, y0, x1, y1] format
-        boxes = center_to_corners_format(boxes)
+        outputs_coords = center_to_corners_format(outputs_coords)
 
         # Convert from relative [0, 1] to absolute [0, height] coordinates
         if target_sizes is not None:
@@ -222,16 +222,20 @@ class GroundingDinoProcessor(ProcessorMixin): #简单理解为前处理和后处
             else:
                 img_h, img_w = target_sizes.unbind(1)
 
-            scale_fct = torch.stack([img_w, img_h, img_w, img_h], dim=1).to(boxes.device)
-            boxes = boxes * scale_fct[:, None, :]
+            scale_factor = torch.stack([img_w, img_h, img_w, img_h], dim=1).to(outputs_coords.device)
+            outputs_coords = outputs_coords * scale_factor[:, None, :]
 
         results = []
-        for idx, (s, b, p) in enumerate(zip(scores, boxes, probs)):
-            score = s[s > box_threshold]
-            box = b[s > box_threshold]
-            prob = p[s > box_threshold]
-            label_ids = get_phrases_from_posmap(prob > text_threshold, input_ids[idx])
+        for idx, (probs_i, scores_i, coords_i) in enumerate(zip(probs, scores, outputs_coords)):
+            valid_scores = scores_i[scores_i > box_threshold]
+            valid_boxes = coords_i[scores_i > box_threshold]
+            
+            valid_probs = probs_i[scores_i > box_threshold]
+            label_ids = get_phrases_from_posmap(valid_probs > text_threshold, input_ids[idx])
             label = self.batch_decode(label_ids)
-            results.append({"scores": score, "labels": label, "boxes": box})
+            results.append({"scores": valid_scores, "labels": label, "boxes": valid_boxes})
 
         return results
+# {'scores': torch.Size([3]) tensor([0.4776, 0.4300, 0.4752], device='cuda:0'), 'labels': ['a cat', 'a cat', 'a remote control'], 'boxes': torch.Size([3, 4]) tensor([[344.4301,  23.0533, 636.9069, 374.0420],
+#         [ 10.9422,  52.3695, 316.3937, 471.5244],
+#         [ 38.2738,  70.7453, 177.1632, 118.4755]], device='cuda:0')}

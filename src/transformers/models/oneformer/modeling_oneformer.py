@@ -1388,10 +1388,10 @@ class OneFormerPixelDecoder(nn.Module):
 
         # Then, apply 1x1 convolution to reduce the channel dimension to d_model (256 by default)
         sources = []
-        position_embeddings_list = []
+        position_embeddings = []
         for level, source in enumerate(features[::-1][: self.num_feature_levels]):
             sources.append(self.input_projections[level](source))
-            position_embeddings_list.append(self.position_embedding(source))
+            position_embeddings.append(self.position_embedding(source))
 
         masks = [torch.zeros((x.size(0), x.size(2), x.size(3)), device=x.device, dtype=torch.bool) for x in sources]
 
@@ -1400,7 +1400,7 @@ class OneFormerPixelDecoder(nn.Module):
         mask_flatten = []
         lvl_pos_embed_flatten = []
         spatial_shapes = []
-        for level, (source, mask, pos_embed) in enumerate(zip(sources, masks, position_embeddings_list)):
+        for level, (source, mask, pos_embed) in enumerate(zip(sources, masks, position_embeddings)):
             batch_size, num_channels, height, width = source.shape
             spatial_shape = (height, width)
             spatial_shapes.append(spatial_shape)

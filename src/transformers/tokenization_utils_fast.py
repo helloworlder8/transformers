@@ -457,64 +457,52 @@ class PreTrainedTokenizerFast(PreTrainedTokenizerBase):
             self._tokenizer.enable_padding(**padding_config)
 
 
+
     def _batch_encode_plus(
         self,
-        batch_text_or_text_pairs: Union[
-            List[TextInput], List[TextInputPair], List[PreTokenizedInput], List[PreTokenizedInputPair]
-        ],
-        add_special_tokens: bool = True,
-        padding_strategy: PaddingStrategy = PaddingStrategy.DO_NOT_PAD,
-        truncation_strategy: TruncationStrategy = TruncationStrategy.DO_NOT_TRUNCATE,
-        max_length: Optional[int] = None,
-        stride: int = 0,
-        is_split_into_words: bool = False,
-        pad_to_multiple_of: Optional[int] = None,
-        padding_side: Optional[bool] = None,
-        return_tensors: Optional[str] = None,
-        return_token_type_ids: Optional[bool] = None,
-        return_attention_mask: Optional[bool] = None,
-        return_overflowing_tokens: bool = False,
-        return_special_tokens_mask: bool = False,
-        return_offsets_mapping: bool = False,
-        return_length: bool = False,
-        verbose: bool = True,
-        split_special_tokens: bool = False,
+        batch_text_or_text_pairs,
+        add_special_tokens=True,
+        padding_strategy=PaddingStrategy.DO_NOT_PAD,
+        truncation_strategy=TruncationStrategy.DO_NOT_TRUNCATE,
+        max_length=None,
+        stride=0,
+        is_split_into_words=False,
+        pad_to_multiple_of=None,
+        padding_side=None,
+        return_tensors=None,
+        return_token_type_ids=None,
+        return_attention_mask=None,
+        return_overflowing_tokens=False,
+        return_special_tokens_mask=False,
+        return_offsets_mapping=False,
+        return_length=False,
+        verbose=True,
+        split_special_tokens=False,
     ) -> BatchEncoding:
-        """
-        Encodes a batch of text or text pairs with padding and truncation options.
-
-        Args:
-            batch_text_or_text_pairs: The batch of text or text pairs to encode.
-            Other arguments control encoding strategies such as padding, truncation, and output format.
-
-        Returns:
-            BatchEncoding: A batch of encoded text with optional additional data.
-        """
         if not isinstance(batch_text_or_text_pairs, (tuple, list)):
-            raise TypeError(
-                f"batch_text_or_text_pairs must be a list or tuple (got {type(batch_text_or_text_pairs)})."
-            )
+            raise TypeError(f"Expected list or tuple, got {type(batch_text_or_text_pairs)}.")
 
         # Configure truncation and padding
         self.set_truncation_and_padding(
             padding_strategy=padding_strategy,
             truncation_strategy=truncation_strategy,
-            max_length=max_length, #none
-            stride=stride, #0
-            pad_to_multiple_of=pad_to_multiple_of, #none
-            padding_side=padding_side, #none
+            max_length=max_length,
+            stride=stride,
+            pad_to_multiple_of=pad_to_multiple_of,
+            padding_side=padding_side,
         )
 
-        # Update tokenizer setting if special token splitting behavior changes
+        # Update tokenizer's special token behavior
         self._tokenizer.encode_special_tokens = split_special_tokens
 
-        # Perform batch encoding
+        # Encode batch
         encodings = self._tokenizer.encode_batch(
             batch_text_or_text_pairs,
-            add_special_tokens=add_special_tokens, #true
-            is_pretokenized=is_split_into_words, #false
+            add_special_tokens=add_special_tokens,
+            is_pretokenized=is_split_into_words,
         )
 
+        # Process each encoding
         tokens_and_encodings = [
             self._convert_encoding(
                 encoding=encoding,
@@ -528,22 +516,25 @@ class PreTrainedTokenizerFast(PreTrainedTokenizerBase):
             )
             for encoding in encodings
         ]
-        sanitized_tokens = {}
-        for key in tokens_and_encodings[0][0].keys():
-            stack = [e for item, _ in tokens_and_encodings for e in item[key]]
-            sanitized_tokens[key] = stack
+
+        # Aggregate results
+        sanitized_tokens = {
+            key: [e for item, _ in tokens_and_encodings for e in item[key]]
+            for key in tokens_and_encodings[0][0].keys()
+        }
+
         sanitized_encodings = [e for _, item in tokens_and_encodings for e in item]
 
-        # If returning overflowing tokens, we need to return a mapping
-        # from the batch idx to the original sample
+        # Handle overflowing tokens
         if return_overflowing_tokens:
-            overflow_to_sample_mapping = []
-            for i, (toks, _) in enumerate(tokens_and_encodings):
-                overflow_to_sample_mapping += [i] * len(toks["input_ids"])
-            sanitized_tokens["overflow_to_sample_mapping"] = overflow_to_sample_mapping
+            sanitized_tokens["overflow_to_sample_mapping"] = [
+                i for i, (toks, _) in enumerate(tokens_and_encodings) for _ in toks["input_ids"]
+            ]
 
+        # Warn about sequences exceeding max length
         for input_ids in sanitized_tokens["input_ids"]:
             self._eventual_warn_about_too_long_sequence(input_ids, max_length, verbose)
+
         return BatchEncoding(sanitized_tokens, sanitized_encodings, tensor_type=return_tensors)
 
 

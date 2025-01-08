@@ -714,14 +714,14 @@ class _BaseAutoModelClass:
             ) #模型 kwargs commit_hash -》 GroundingDinoConfig
 
         # Determine the model class
-        model_class = cls.determine_model_class(
+        model_class = cls.determine_model_class( #找到内存空间
             config, cls, model_name_or_path, code_revision, hub_kwargs, kwargs, trust_remote_code
         )
 
         # Set adapter kwargs and return the model instance 使用其他的配置参数
         kwargs["adapter_kwargs"] = adapter_kwargs
         return model_class.from_pretrained(
-            model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs
+            model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs #str () 配置类 {} {'adapter_kwargs': {}}
         )
 
 

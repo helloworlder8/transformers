@@ -37,7 +37,7 @@ class BaseImageProcessor(ImageProcessingMixin):
         super().__init__(**kwargs)
 
     def __call__(self, images, **kwargs) -> BatchFeature:
-        """Preprocess an image or a batch of images."""
+        """Preprocess an image or a batch of images.""" #预处理图像
         return self.preprocess(images, **kwargs)
 
     def preprocess(self, images, **kwargs) -> BatchFeature:

@@ -1642,7 +1642,7 @@ class DetaModel(DetaPreTrainedModel):
         # Extract multi-scale feature maps of same resolution `config.d_model` (cf Figure 4 in paper)
         # First, sent pixel_values + pixel_mask through Backbone to obtain the features
         # which is a list of tuples
-        features, position_embeddings_list = self.backbone(pixel_values, pixel_mask)
+        features, position_embeddings = self.backbone(pixel_values, pixel_mask)
 
         # Then, apply 1x1 convolution to reduce the channel dimension to d_model (256 by default)
         sources = []
@@ -1665,7 +1665,7 @@ class DetaModel(DetaPreTrainedModel):
                 pos_l = self.backbone.position_embedding(source, mask).to(source.dtype)
                 sources.append(source)
                 masks.append(mask)
-                position_embeddings_list.append(pos_l)
+                position_embeddings.append(pos_l)
 
         # Create queries
         query_embeds = None
@@ -1678,7 +1678,7 @@ class DetaModel(DetaPreTrainedModel):
         mask_flatten = [mask.flatten(1) for mask in masks]
 
         lvl_pos_embed_flatten = []
-        for level, pos_embed in enumerate(position_embeddings_list):
+        for level, pos_embed in enumerate(position_embeddings):
             pos_embed = pos_embed.flatten(2).transpose(1, 2)
             lvl_pos_embed = pos_embed + self.level_embed[level].view(1, 1, -1)
             lvl_pos_embed_flatten.append(lvl_pos_embed)

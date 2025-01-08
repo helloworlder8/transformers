@@ -1204,7 +1204,7 @@ class TableTransformerModel(TableTransformerPreTrainedModel):
         # First, sent pixel_values + pixel_mask through Backbone to obtain the features
         # pixel_values should be of shape (batch_size, num_channels, height, width)
         # pixel_mask should be of shape (batch_size, height, width)
-        features, position_embeddings_list = self.backbone(pixel_values, pixel_mask)
+        features, position_embeddings = self.backbone(pixel_values, pixel_mask)
 
         # get final feature map and downsampled mask
         feature_map, mask = features[-1]
@@ -1218,7 +1218,7 @@ class TableTransformerModel(TableTransformerPreTrainedModel):
         # Third, flatten the feature map + object queries of shape NxCxHxW to NxCxHW, and permute it to NxHWxC
         # In other words, turn their shape into (batch_size, sequence_length, hidden_size)
         flattened_features = projected_feature_map.flatten(2).permute(0, 2, 1)
-        object_queries = position_embeddings_list[-1].flatten(2).permute(0, 2, 1)
+        object_queries = position_embeddings[-1].flatten(2).permute(0, 2, 1)
 
         flattened_mask = mask.flatten(1)
 

@@ -1005,7 +1005,7 @@ class BertModel(BertPreTrainedModel):
         config_class=_CONFIG_FOR_DOC,
     )
     
-    def _prepare_config_flags(
+    def _handle_params(
         self, output_attentions, output_hidden_states, return_dict
     ):
         output_attentions = (
@@ -1146,7 +1146,7 @@ class BertModel(BertPreTrainedModel):
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
 
         # Step 1: Prepare configuration flags
-        output_attentions, output_hidden_states, return_dict, use_cache = self._prepare_config_flags(output_attentions, output_hidden_states, return_dict
+        output_attentions, output_hidden_states, return_dict, use_cache = self._handle_params(output_attentions, output_hidden_states, return_dict
         )
     
 

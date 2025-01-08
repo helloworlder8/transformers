@@ -16,12 +16,12 @@ from typing import TYPE_CHECKING
 
 from ...utils import OptionalDependencyNotAvailable, _LazyModule, is_torch_available, is_vision_available
 
-
+# 前键后值
 _import_structure = {
     "configuration_grounding_dino": ["GroundingDinoConfig"],
     "processing_grounding_dino": ["GroundingDinoProcessor"],
 }
-
+#
 try:
     if not is_torch_available():
         raise OptionalDependencyNotAvailable()

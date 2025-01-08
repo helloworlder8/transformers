@@ -806,7 +806,7 @@ def compute_segments(
     return segmentation, segments
 
 
-class GroundingDinoImageProcessor(BaseImageProcessor):
+class GroundingDinoImageProcessor(BaseImageProcessor): #图像预处理的方法
     r"""
     Constructs a Grounding DINO image processor.
 
@@ -1351,7 +1351,7 @@ class GroundingDinoImageProcessor(BaseImageProcessor):
                 resample=resample,
             )
             
-        def validate_inputs():
+        def validate_images_and_annotations():
             nonlocal images, annotations, format
 
             images = make_list_of_images(images)
@@ -1419,7 +1419,7 @@ class GroundingDinoImageProcessor(BaseImageProcessor):
                 annotations = prepared_annotations
 
         def apply_transformations():
-            nonlocal images, annotations
+            nonlocal images, annotations #(480, 640, 3) None
 
             # Resize images and annotations if required
             if do_resize:
@@ -1444,11 +1444,11 @@ class GroundingDinoImageProcessor(BaseImageProcessor):
                     ]
 
             # Rescale images if required
-            if do_rescale:
+            if do_rescale: #true
                 images = [self.rescale(image, rescale_factor, input_data_format=input_data_format) for image in images]
 
             # Normalize images if required
-            if do_normalize:
+            if do_normalize: #true
                 images = [
                     self.normalize(image, image_mean, image_std, input_data_format=input_data_format) for image in images
                 ]
@@ -1459,9 +1459,7 @@ class GroundingDinoImageProcessor(BaseImageProcessor):
                     self.normalize_annotation(annotation, get_image_size(image, input_data_format))
                     for annotation, image in zip(annotations, images)
                 ]
-
-        def encode_inputs():
-            nonlocal images,annotations,data_format,input_data_format,do_convert_annotations,return_tensors,pad_size
+                
             if do_pad:
                 return self.pad(
                     images,
@@ -1485,12 +1483,12 @@ class GroundingDinoImageProcessor(BaseImageProcessor):
                     ]
                 return encoded_inputs
 
+
         # Main processing flow
         initialize_parameters()
-        validate_inputs()
+        validate_images_and_annotations()
         prepare_images_and_annotations()
-        apply_transformations()
-        return encode_inputs()
+        return apply_transformations()
 
 
     # Copied from transformers.models.owlvit.image_processing_owlvit.OwlViTImageProcessor.post_process_object_detection with OwlViT->GroundingDino

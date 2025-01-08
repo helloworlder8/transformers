@@ -1702,7 +1702,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         # Extract multi-scale feature maps of same resolution `config.d_model` (cf Figure 4 in paper)
         # First, sent pixel_values + pixel_mask through Backbone to obtain the features
         # which is a list of tuples
-        features, position_embeddings_list = self.backbone(pixel_values, pixel_mask)
+        features, position_embeddings = self.backbone(pixel_values, pixel_mask)
 
         # Then, apply 1x1 convolution to reduce the channel dimension to d_model (256 by default)
         sources = []
@@ -1727,7 +1727,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
                 pos_l = self.backbone.position_embedding(source, mask).to(source.dtype)
                 sources.append(source)
                 masks.append(mask)
-                position_embeddings_list.append(pos_l)
+                position_embeddings.append(pos_l)
 
         # Create queries
         query_embeds = None
@@ -1739,7 +1739,7 @@ class DeformableDetrModel(DeformableDetrPreTrainedModel):
         mask_flatten = []
         lvl_pos_embed_flatten = []
         spatial_shapes_list = []
-        for level, (source, mask, pos_embed) in enumerate(zip(sources, masks, position_embeddings_list)):
+        for level, (source, mask, pos_embed) in enumerate(zip(sources, masks, position_embeddings)):
             batch_size, num_channels, height, width = source.shape
             spatial_shape = (height, width)
             spatial_shapes_list.append(spatial_shape)

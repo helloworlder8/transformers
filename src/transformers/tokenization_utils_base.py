@@ -2688,7 +2688,7 @@ class PreTrainedTokenizerBase(SpecialTokensMixin, PushToHubMixin):
         if text is not None:
             if not self._in_target_context_manager:
                 self._switch_to_input_mode()
-            encodings = self._call_one(text=text, text_pair=text_pair, **all_kwargs)
+            encodings = self._call_one(text=text, text_pair=text_pair, **all_kwargs) # input_ids token_type_ids attention_mask
 
         if text_target is not None:
             self._switch_to_target_mode()
@@ -2776,25 +2776,25 @@ class PreTrainedTokenizerBase(SpecialTokensMixin, PushToHubMixin):
             )
         else:
             return self.encode_plus(
-                text=text,
-                text_pair=text_pair,
-                add_special_tokens=add_special_tokens,
-                padding=padding,
-                truncation=truncation,
-                max_length=max_length,
-                stride=stride,
-                is_split_into_words=is_split_into_words,
-                pad_to_multiple_of=pad_to_multiple_of,
-                padding_side=padding_side,
-                return_tensors=return_tensors,
-                return_token_type_ids=return_token_type_ids,
+                text=text, #'a cat. a remote control.'
+                text_pair=text_pair, #none
+                add_special_tokens=add_special_tokens, #true
+                padding=padding, #false
+                truncation=truncation, #none
+                max_length=max_length, #none
+                stride=stride, #0
+                is_split_into_words=is_split_into_words, #false
+                pad_to_multiple_of=pad_to_multiple_of, #none
+                padding_side=padding_side, #none
+                return_tensors=return_tensors, #pt
+                return_token_type_ids=return_token_type_ids, #true
                 return_attention_mask=return_attention_mask,
                 return_overflowing_tokens=return_overflowing_tokens,
                 return_special_tokens_mask=return_special_tokens_mask,
                 return_offsets_mapping=return_offsets_mapping,
-                return_length=return_length,
-                verbose=verbose,
-                split_special_tokens=split_special_tokens,
+                return_length=return_length, #false
+                verbose=verbose, #true
+                split_special_tokens=split_special_tokens, #false
                 **kwargs,
             )
 
@@ -2841,7 +2841,7 @@ class PreTrainedTokenizerBase(SpecialTokensMixin, PushToHubMixin):
                 method).
         """
 
-        # 最长填充 不做截断 none {'split_special_tokens': False}
+        # 不做填充 不做截断 None {'split_special_tokens': False}
         padding_strategy, truncation_strategy, max_length, kwargs = self._get_padding_truncation_strategies(
             padding=padding,
             truncation=truncation,

@@ -1008,26 +1008,20 @@ class BertModel(BertPreTrainedModel):
     def _handle_params(
         self, output_attentions, output_hidden_states, return_dict
     ):
-        output_attentions = (
-            output_attentions if output_attentions is not None else self.config.output_attentions
-        )
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = (
-            return_dict if return_dict is not None else self.config.use_return_dict
-        )
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
         
         if self.config.is_decoder:
             use_cache = (
-                use_cache if use_cache is not None else self.config.use_cache
+                use_cache or self.config.use_cache
             )
         else:
             use_cache = False
             
         return output_attentions, output_hidden_states, return_dict, use_cache
 
-    def _validate_and_get_input_shape_device(self, input_ids, inputs_embeds):
+    def _get_input_shape_device(self, input_ids, inputs_embeds):
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
         elif input_ids is not None:
@@ -1058,7 +1052,7 @@ class BertModel(BertPreTrainedModel):
                 token_type_ids = torch.zeros((batch_size, seq_length), dtype=torch.long, device=device)
         return token_type_ids
 
-    def _compute_embeddings(self, input_ids, inputs_embeds, position_ids, token_type_ids, past_key_values_length):
+    def _compute_embeddings(self, input_ids, inputs_embeds, token_type_ids, position_ids, past_key_values_length):
         embedding_output = self.embeddings(
             input_ids=input_ids,
             position_ids=position_ids,
@@ -1131,18 +1125,22 @@ class BertModel(BertPreTrainedModel):
     def forward(
         self,
         input_ids: Optional[torch.Tensor] = None,
-        attention_mask: Optional[torch.Tensor] = None,
         token_type_ids: Optional[torch.Tensor] = None,
+        
+        attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.Tensor] = None,
+        
         head_mask: Optional[torch.Tensor] = None,
         inputs_embeds: Optional[torch.Tensor] = None,
         encoder_hidden_states: Optional[torch.Tensor] = None,
         encoder_attention_mask: Optional[torch.Tensor] = None,
         past_key_values: Optional[List[torch.FloatTensor]] = None,
         use_cache: Optional[bool] = None,
+        
+        return_dict: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
-        return_dict: Optional[bool] = None,
+
     ) -> Union[Tuple[torch.Tensor], BaseModelOutputWithPoolingAndCrossAttentions]:
 
         # Step 1: Prepare configuration flags
@@ -1151,20 +1149,21 @@ class BertModel(BertPreTrainedModel):
     
 
         # Step 2: Validate inputs and determine input shape and device
-        input_shape, device = self._validate_and_get_input_shape_device(input_ids, inputs_embeds)
+        input_shape, device = self._get_input_shape_device(input_ids, inputs_embeds)
         batch_size, seq_length = input_shape
-        
-        # Step 3: Determine past key values length
+
+        # Step 4: Determine past key values length
         past_key_values_length = self._get_past_key_values_length(past_key_values)
 
-        # Step 4: Get token type IDs
+        # Step 3: Get token type IDs
         token_type_ids = self._get_token_type_ids(token_type_ids, batch_size, seq_length, device)
+        
 
 
         # Step 5: Compute embeddings
         embedding_output = self._compute_embeddings(
-            input_ids, inputs_embeds, position_ids, token_type_ids, past_key_values_length
-        )
+            input_ids, inputs_embeds, token_type_ids, position_ids, past_key_values_length
+        ) #torch.Size([1, 9, 768])
         
 
         # Step 6: Prepare attention masks

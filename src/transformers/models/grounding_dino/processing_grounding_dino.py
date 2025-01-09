@@ -26,6 +26,10 @@ from ...processing_utils import ImagesKwargs, ProcessingKwargs, ProcessorMixin, 
 from ...tokenization_utils_base import BatchEncoding, PreTokenizedInput, TextInput
 from ...utils import TensorType, is_torch_available
 
+import numpy as np
+import cv2
+import supervision as sv
+from torchvision.ops import box_convert
 
 if is_torch_available():
     import torch
@@ -172,7 +176,7 @@ class GroundingDinoProcessor(ProcessorMixin): #简单理解为前处理和后处
         image_processor_input_names = self.image_processor.model_input_names
         return list(dict.fromkeys(tokenizer_input_names + image_processor_input_names))
 
-    def post_process_grounded_object_detection(
+    def post_process(
         self,
         outputs,
         input_ids,
@@ -239,3 +243,37 @@ class GroundingDinoProcessor(ProcessorMixin): #简单理解为前处理和后处
 # {'scores': torch.Size([3]) tensor([0.4776, 0.4300, 0.4752], device='cuda:0'), 'labels': ['a cat', 'a cat', 'a remote control'], 'boxes': torch.Size([3, 4]) tensor([[344.4301,  23.0533, 636.9069, 374.0420],
 #         [ 10.9422,  52.3695, 316.3937, 471.5244],
 #         [ 38.2738,  70.7453, 177.1632, 118.4755]], device='cuda:0')}
+
+    def annotate(self, img, result) -> np.ndarray:
+        """    
+        This function annotates an image with bounding boxes and labels.
+
+        Parameters:
+        image_source (np.ndarray): The source image to be annotated.
+        boxes (torch.Tensor): A tensor containing bounding box coordinates.
+        logits (torch.Tensor): A tensor containing confidence scores for each bounding box.
+        phrases (List[str]): A list of labels for each bounding box.
+
+        Returns:
+        np.ndarray: The annotated image.
+        """
+        img_np = np.array(img)
+
+        scores = result[0]["scores"].cpu().numpy()
+        names = result[0]["labels"]
+        boxes = result[0]["boxes"].cpu().numpy()
+        detections = sv.Detections(xyxy=boxes)
+
+        labels = [
+            f"{name} {score:.2f}"
+            for name, score
+            in zip(names, scores)
+        ]
+
+        bbox_annotator = sv.BoxAnnotator(color_lookup=sv.ColorLookup.INDEX)
+        label_annotator = sv.LabelAnnotator(color_lookup=sv.ColorLookup.INDEX)
+        annotated_frame = cv2.cvtColor(img_np, cv2.COLOR_RGB2BGR)
+        annotated_frame = bbox_annotator.annotate(scene=annotated_frame, detections=detections)
+        annotated_frame = label_annotator.annotate(scene=annotated_frame, detections=detections, labels=labels)
+        cv2.imwrite("save_path.jpg", annotated_frame)
+        return annotated_frame

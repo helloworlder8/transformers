@@ -1,0 +1,16 @@
+{
+    "search.exclude": {
+        "**/project":    true,
+        "tests": true
+    },
+        "files.exclude": {
+        "**/project":     true,
+        "tests": true
+    },
+    "python.analysis.exclude": [
+        "**/project",
+        "tests"
+    ],
+    "editor.wrappingColumn": 0
+
+}

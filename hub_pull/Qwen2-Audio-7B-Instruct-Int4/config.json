@@ -1,0 +1,41 @@
+{
+  "_name_or_path": "Qwen2-Audio-7B-Instruct",
+  "architectures": [
+    "Qwen2AudioForConditionalGeneration"
+  ],
+  "audio_config": {
+    "model_type": "qwen2_audio_encoder"
+  },
+  "audio_token_index": 151646,
+  "ignore_index": -100,
+  "model_type": "qwen2_audio",
+  "quantization_config": {
+    "_load_in_4bit": true,
+    "_load_in_8bit": false,
+    "bnb_4bit_compute_dtype": "float16",
+    "bnb_4bit_quant_storage": "uint8",
+    "bnb_4bit_quant_type": "nf4",
+    "bnb_4bit_use_double_quant": true,
+    "llm_int8_enable_fp32_cpu_offload": false,
+    "llm_int8_has_fp16_weight": false,
+    "llm_int8_skip_modules": null,
+    "llm_int8_threshold": 6.0,
+    "load_in_4bit": true,
+    "load_in_8bit": false,
+    "quant_method": "bitsandbytes"
+  },
+  "text_config": {
+    "bos_token_id": 151643,
+    "eos_token_id": 151645,
+    "intermediate_size": 11008,
+    "max_position_embeddings": 8192,
+    "model_type": "qwen2",
+    "rms_norm_eps": 1e-05,
+    "torch_dtype": "bfloat16",
+    "use_mrope": false,
+    "vocab_size": 156032
+  },
+  "torch_dtype": "float16",
+  "transformers_version": "4.45.0.dev0",
+  "vocab_size": 156032
+}

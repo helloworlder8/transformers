@@ -1,0 +1,19 @@
+{
+    "search.exclude": {
+        "**/project":    true,
+        "transformers/tests": true,
+        // "Qwen": true,
+    },
+        "files.exclude": {
+        // "**/project":     true,
+        "transformers/tests": true,
+        // "Qwen": true,
+    },
+    "python.analysis.exclude": [
+        "**/project",
+        "transformers/tests",
+        "Qwen"
+    ],
+    "editor.wrappingColumn": 0
+
+}

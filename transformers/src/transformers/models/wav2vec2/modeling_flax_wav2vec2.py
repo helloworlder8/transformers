@@ -1002,8 +1002,8 @@ class FlaxWav2Vec2Module(nn.Module):
         return FlaxWav2Vec2BaseModelOutput(
             last_hidden_state=hidden_states,
             extract_features=extract_features,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def _get_feat_extract_output_lengths(

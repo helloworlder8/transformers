@@ -195,7 +195,7 @@ class ViltEmbeddings(nn.Module):
         pixel_values,
         pixel_mask,
         inputs_embeds,
-        image_embeds,
+        vision_embeds,
         image_token_type_idx=1,
     ):
         # PART 1: text embeddings
@@ -204,8 +204,8 @@ class ViltEmbeddings(nn.Module):
         )
 
         # PART 2: patch embeddings (with interpolated position encodings)
-        if image_embeds is None:
-            image_embeds, image_masks, patch_index = self.visual_embed(
+        if vision_embeds is None:
+            vision_embeds, image_masks, patch_index = self.visual_embed(
                 pixel_values, pixel_mask, max_image_length=self.config.max_image_length
             )
         else:
@@ -218,12 +218,12 @@ class ViltEmbeddings(nn.Module):
         text_embeds = text_embeds + self.token_type_embeddings(
             torch.zeros_like(attention_mask, dtype=torch.long, device=text_embeds.device)
         )
-        image_embeds = image_embeds + self.token_type_embeddings(
+        vision_embeds = vision_embeds + self.token_type_embeddings(
             torch.full_like(image_masks, image_token_type_idx, dtype=torch.long, device=text_embeds.device)
         )
 
         # PART 4: concatenate
-        embeddings = torch.cat([text_embeds, image_embeds], dim=1)
+        embeddings = torch.cat([text_embeds, vision_embeds], dim=1)
         masks = torch.cat([attention_mask, image_masks], dim=1)
 
         return embeddings, masks
@@ -549,8 +549,8 @@ class ViltEncoder(nn.Module):
             return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
         return BaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
 
@@ -634,7 +634,7 @@ VILT_INPUTS_DOCSTRING = r"""
             is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
             model's internal embedding lookup matrix.
 
-        image_embeds (`torch.FloatTensor` of shape `(batch_size, num_patches, hidden_size)`, *optional*):
+        vision_embeds (`torch.FloatTensor` of shape `(batch_size, num_patches, hidden_size)`, *optional*):
             Optionally, instead of passing `pixel_values`, you can choose to directly pass an embedded representation.
             This is useful if you want more control over how to convert `pixel_values` into patch embeddings.
 
@@ -689,7 +689,7 @@ VILT_IMAGES_AND_TEXT_CLASSIFICATION_INPUTS_DOCSTRING = r"""
             is useful if you want more control over how to convert `input_ids` indices into associated vectors than the
             model's internal embedding lookup matrix.
 
-        image_embeds (`torch.FloatTensor` of shape `(batch_size, num_images, num_patches, hidden_size)`, *optional*):
+        vision_embeds (`torch.FloatTensor` of shape `(batch_size, num_images, num_patches, hidden_size)`, *optional*):
             Optionally, instead of passing `pixel_values`, you can choose to directly pass an embedded representation.
             This is useful if you want more control over how to convert `pixel_values` into patch embeddings.
 
@@ -747,7 +747,7 @@ class ViltModel(ViltPreTrainedModel):
         pixel_mask: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        image_embeds: Optional[torch.FloatTensor] = None,
+        vision_embeds: Optional[torch.FloatTensor] = None,
         image_token_type_idx: Optional[int] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -797,12 +797,12 @@ class ViltModel(ViltPreTrainedModel):
         if attention_mask is None:
             attention_mask = torch.ones(((text_batch_size, seq_length)), device=device)
 
-        if pixel_values is not None and image_embeds is not None:
-            raise ValueError("You cannot specify both pixel_values and image_embeds at the same time")
-        elif pixel_values is None and image_embeds is None:
-            raise ValueError("You have to specify either pixel_values or image_embeds")
+        if pixel_values is not None and vision_embeds is not None:
+            raise ValueError("You cannot specify both pixel_values and vision_embeds at the same time")
+        elif pixel_values is None and vision_embeds is None:
+            raise ValueError("You have to specify either pixel_values or vision_embeds")
 
-        image_batch_size = pixel_values.shape[0] if pixel_values is not None else image_embeds.shape[0]
+        image_batch_size = pixel_values.shape[0] if pixel_values is not None else vision_embeds.shape[0]
         if image_batch_size != text_batch_size:
             raise ValueError("The text inputs and image inputs need to have the same batch size")
         if pixel_mask is None:
@@ -822,7 +822,7 @@ class ViltModel(ViltPreTrainedModel):
             pixel_values,
             pixel_mask,
             inputs_embeds,
-            image_embeds,
+            vision_embeds,
             image_token_type_idx=image_token_type_idx,
         )
 
@@ -848,8 +848,8 @@ class ViltModel(ViltPreTrainedModel):
         return BaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -904,7 +904,7 @@ class ViltForMaskedLM(ViltPreTrainedModel):
         pixel_mask: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        image_embeds: Optional[torch.FloatTensor] = None,
+        vision_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -976,7 +976,7 @@ class ViltForMaskedLM(ViltPreTrainedModel):
             pixel_mask=pixel_mask,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -1083,7 +1083,7 @@ class ViltForQuestionAnswering(ViltPreTrainedModel):
         pixel_mask: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        image_embeds: Optional[torch.FloatTensor] = None,
+        vision_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -1131,7 +1131,7 @@ class ViltForQuestionAnswering(ViltPreTrainedModel):
             pixel_mask=pixel_mask,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -1190,7 +1190,7 @@ class ViltForImageAndTextRetrieval(ViltPreTrainedModel):
         pixel_mask: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        image_embeds: Optional[torch.FloatTensor] = None,
+        vision_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -1238,7 +1238,7 @@ class ViltForImageAndTextRetrieval(ViltPreTrainedModel):
             pixel_mask=pixel_mask,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
@@ -1296,7 +1296,7 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
         pixel_mask: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        image_embeds: Optional[torch.FloatTensor] = None,
+        vision_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -1342,13 +1342,13 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
             # add dummy num_images dimension
             pixel_values = pixel_values.unsqueeze(1)
 
-        if image_embeds is not None and image_embeds.ndim == 3:
+        if vision_embeds is not None and vision_embeds.ndim == 3:
             # add dummy num_images dimension
-            image_embeds = image_embeds.unsqueeze(1)
+            vision_embeds = vision_embeds.unsqueeze(1)
 
         num_images = pixel_values.shape[1] if pixel_values is not None else None
         if num_images is None:
-            num_images = image_embeds.shape[1] if image_embeds is not None else None
+            num_images = vision_embeds.shape[1] if vision_embeds is not None else None
         if num_images != self.config.num_images:
             raise ValueError(
                 "Make sure to match the number of images in the model with the number of images in the input."
@@ -1366,7 +1366,7 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
                 pixel_mask=pixel_mask[:, i, :, :] if pixel_mask is not None else None,
                 head_mask=head_mask,
                 inputs_embeds=inputs_embeds,
-                image_embeds=image_embeds[:, i, :, :] if image_embeds is not None else None,
+                vision_embeds=vision_embeds[:, i, :, :] if vision_embeds is not None else None,
                 image_token_type_idx=i + 1,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
@@ -1432,7 +1432,7 @@ class ViltForTokenClassification(ViltPreTrainedModel):
         pixel_mask: Optional[torch.LongTensor] = None,
         head_mask: Optional[torch.FloatTensor] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
-        image_embeds: Optional[torch.FloatTensor] = None,
+        vision_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
@@ -1455,7 +1455,7 @@ class ViltForTokenClassification(ViltPreTrainedModel):
             pixel_mask=pixel_mask,
             head_mask=head_mask,
             inputs_embeds=inputs_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,

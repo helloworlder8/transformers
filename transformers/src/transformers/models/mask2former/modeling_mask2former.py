@@ -1380,7 +1380,7 @@ class Mask2FormerPixelDecoder(nn.Module):
         return Mask2FormerPixelDecoderOutput(
             mask_features=self.mask_projection(outputs[-1]),
             multi_scale_features=tuple(multi_scale_features),
-            attentions=encoder_outputs.attentions,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 

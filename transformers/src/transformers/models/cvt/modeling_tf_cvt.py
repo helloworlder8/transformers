@@ -843,7 +843,7 @@ class TFCvtMainLayer(keras.layers.Layer):
         return TFBaseModelOutputWithCLSToken(
             last_hidden_state=sequence_output,
             cls_token_value=encoder_outputs.cls_token_value,
-            hidden_states=encoder_outputs.hidden_states,
+            all_hidden_states=encoder_outputs.all_hidden_states,
         )
 
     def build(self, input_shape=None):

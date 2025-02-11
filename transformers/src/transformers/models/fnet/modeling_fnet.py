@@ -597,7 +597,7 @@ class FNetModel(FNetPreTrainedModel):
         return BaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooler_output,
-            hidden_states=encoder_outputs.hidden_states,
+            all_hidden_states=encoder_outputs.all_hidden_states,
         )
 
 

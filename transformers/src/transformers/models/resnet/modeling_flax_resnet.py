@@ -569,7 +569,7 @@ class FlaxResNetModule(nn.Module):
         return FlaxBaseModelOutputWithPoolingAndNoAttention(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
+            all_hidden_states=encoder_outputs.all_hidden_states,
         )
 
 

@@ -749,7 +749,7 @@ class Qwen2AudioEncoder(Qwen2AudioPreTrainedModel):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
     # Ignore copy

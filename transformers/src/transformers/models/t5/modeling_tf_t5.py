@@ -1297,8 +1297,8 @@ class TFT5Model(TFT5PreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     def build(self, input_shape=None):
@@ -1514,8 +1514,8 @@ class TFT5ForConditionalGeneration(TFT5PreTrainedModel, TFCausalLanguageModeling
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     def serving_output(self, output):
@@ -1662,8 +1662,8 @@ class TFT5EncoderModel(TFT5PreTrainedModel):
 
         return TFBaseModelOutput(
             last_hidden_state=encoder_outputs.last_hidden_state,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def build(self, input_shape=None):

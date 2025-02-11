@@ -621,7 +621,7 @@ class TFSegformerMainLayer(keras.layers.Layer):
         return TFBaseModelOutput(
             last_hidden_state=sequence_output,
             hidden_states=hidden_states if output_hidden_states else encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def build(self, input_shape=None):

@@ -47,7 +47,7 @@ class TFSamVisionEncoderOutput(ModelOutput):
     layer to the pooler_output.
 
     Args:
-        image_embeds (`tf.Tensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
+        vision_embeds (`tf.Tensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
             The image embeddings obtained by applying the projection layer to the pooler_output.
         last_hidden_state (`tf.Tensor` of shape `(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the output of the last layer of the model.
@@ -64,7 +64,7 @@ class TFSamVisionEncoderOutput(ModelOutput):
             heads.
     """
 
-    image_embeds: tf.Tensor | None = None
+    vision_embeds: tf.Tensor | None = None
     last_hidden_state: tf.Tensor = None
     hidden_states: Tuple[tf.Tensor, ...] | None = None
     attentions: Tuple[tf.Tensor, ...] | None = None
@@ -1308,8 +1308,8 @@ class TFSamVisionEncoder(keras.layers.Layer):
 
         return TFSamVisionEncoderOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
 
@@ -1596,7 +1596,7 @@ class TFSamModel(TFSamPreTrainedModel):
             input_masks=input_masks,
         )
 
-        low_res_masks, iou_predictions, mask_decoder_attentions = self.mask_decoder(
+        pred_masks, iou_scores, mask_decoder_attentions = self.mask_decoder(
             image_embeddings=image_embeddings,
             image_positional_embeddings=image_positional_embeddings,
             sparse_prompt_embeddings=sparse_embeddings,
@@ -1606,7 +1606,7 @@ class TFSamModel(TFSamPreTrainedModel):
         )
 
         if not return_dict:
-            output = (iou_predictions, low_res_masks)
+            output = (iou_scores, pred_masks)
             if output_hidden_states:
                 output = output + (vision_hidden_states,)
 
@@ -1615,8 +1615,8 @@ class TFSamModel(TFSamPreTrainedModel):
             return output
 
         return TFSamImageSegmentationOutput(
-            iou_scores=iou_predictions,
-            pred_masks=low_res_masks,
+            iou_scores=iou_scores,
+            pred_masks=pred_masks,
             vision_hidden_states=vision_hidden_states,
             vision_attentions=vision_attentions,
             mask_decoder_attentions=mask_decoder_attentions,

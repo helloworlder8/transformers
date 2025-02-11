@@ -1271,7 +1271,7 @@ class OneFormerPixelDecoderEncoderOnly(nn.Module):
             encoder_states = encoder_states + (hidden_states,)
 
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
 
@@ -1471,7 +1471,7 @@ class OneFormerPixelDecoder(nn.Module):
         return OneFormerPixelDecoderOutput(
             mask_features=self.mask_projection(out[-1]),
             multi_scale_features=multi_scale_features,
-            attentions=encoder_outputs.attentions,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 

@@ -871,8 +871,8 @@ class SeamlessM4TConformerEncoder(nn.Module):
             return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
         return BaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
 
@@ -1614,8 +1614,8 @@ class SeamlessM4TSpeechEncoder(SeamlessM4TPreTrainedModel):
 
         return Wav2Vec2BaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -1804,7 +1804,7 @@ class SeamlessM4TEncoder(SeamlessM4TPreTrainedModel):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
 
@@ -2140,8 +2140,8 @@ class SeamlessM4TTextToUnitModel(SeamlessM4TPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -2780,8 +2780,8 @@ class SeamlessM4TForTextToText(SeamlessM4TPreTrainedModel, GenerationMixin):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     def generate(
@@ -3048,8 +3048,8 @@ class SeamlessM4TForSpeechToText(SeamlessM4TPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     def generate(
@@ -3324,8 +3324,8 @@ class SeamlessM4TForTextToSpeech(SeamlessM4TPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     @torch.no_grad()
@@ -3656,8 +3656,8 @@ class SeamlessM4TForSpeechToSpeech(SeamlessM4TPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     @torch.no_grad()
@@ -4054,8 +4054,8 @@ class SeamlessM4TModel(SeamlessM4TPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
     @torch.no_grad()

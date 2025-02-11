@@ -374,19 +374,19 @@ class VisionTextDualEncoderModel(PreTrainedModel):
             return_dict=return_dict,
         )
 
-        image_embeds = vision_outputs[1]  # pooler_output
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]  # pooler_output
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]  # pooler_output
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
+        vision_embeds = vision_embeds / vision_embeds.norm(dim=-1, keepdim=True)
         text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
-        logits_per_text = torch.matmul(text_embeds, image_embeds.t()) * logit_scale
+        logits_per_text = torch.matmul(text_embeds, vision_embeds.t()) * logit_scale
         logits_per_image = logits_per_text.T
 
         loss = None
@@ -394,7 +394,7 @@ class VisionTextDualEncoderModel(PreTrainedModel):
             loss = clip_loss(logits_per_text)
 
         if not return_dict:
-            output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
 
         return CLIPOutput(
@@ -402,7 +402,7 @@ class VisionTextDualEncoderModel(PreTrainedModel):
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

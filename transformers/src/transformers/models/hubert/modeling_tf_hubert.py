@@ -1054,8 +1054,8 @@ class TFHubertEncoder(keras.layers.Layer):
             return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
         return TFBaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
     def build(self, input_shape=None):
@@ -1137,8 +1137,8 @@ class TFHubertEncoderStableLayerNorm(keras.layers.Layer):
             return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
         return TFBaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
     def build(self, input_shape=None):
@@ -1295,8 +1295,8 @@ class TFHubertMainLayer(keras.layers.Layer):
 
         return TFBaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 

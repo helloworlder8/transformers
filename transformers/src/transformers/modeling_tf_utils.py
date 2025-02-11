@@ -68,7 +68,7 @@ from .utils import (
     requires_backends,
     working_or_temp_dir,
 )
-from .utils.hub import convert_file_size_to_int, download_checkpoint_shard_files
+from .utils.hub import convert_file_size_to_int, get_checkpoint_shard_files
 
 
 if is_safetensors_available():
@@ -2906,7 +2906,7 @@ class TFPreTrainedModel(keras.Model, TFModelUtilsMixin, TFGenerationMixin, PushT
         # We'll need to download and cache each checkpoint shard if the checkpoint is sharded.
         if is_sharded:
             # resolved_archive_file becomes a list of files that point to the different checkpoint shards in this case.
-            resolved_archive_file, sharded_metadata = download_checkpoint_shard_files(
+            resolved_archive_file, sharded_metadata = get_checkpoint_shard_files(
                 model_name_or_path,
                 resolved_archive_file,
                 cache_dir=cache_dir,

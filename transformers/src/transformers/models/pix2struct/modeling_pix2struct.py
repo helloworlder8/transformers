@@ -349,8 +349,8 @@ class Pix2StructVisionEncoder(nn.Module):
             return tuple(v for v in [hidden_states, all_hidden_states, all_self_attentions] if v is not None)
         return BaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
 
@@ -629,8 +629,8 @@ class Pix2StructVisionModel(Pix2StructPreTrainedModel):
 
         return BaseModelOutput(
             last_hidden_state=sequence_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -1889,6 +1889,6 @@ class Pix2StructForConditionalGeneration(Pix2StructPreTrainedModel, GenerationMi
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )

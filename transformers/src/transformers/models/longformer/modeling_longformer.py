@@ -1744,8 +1744,8 @@ class LongformerModel(LongformerPreTrainedModel):
         return LongformerBaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
             global_attentions=encoder_outputs.global_attentions,
         )
 

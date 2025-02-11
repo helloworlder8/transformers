@@ -120,10 +120,10 @@ PROCESSOR_MAPPING = _LazyAutoMapping(CONFIG_MAPPING_NAMES, PROCESSOR_MAPPING_NAM
 
 def Instantiation_processor_class(class_name: str):
     for module_name, processors in PROCESSOR_MAPPING_NAMES.items():
-        if class_name in processors:
+        if class_name in processors: #代码内部实现了'CLIPSegProcessor'的封装
             module_name = model_type_to_module_name(module_name) # str = grounding_dino
 
-            module = importlib.import_module(f".{module_name}", "transformers.models") #+'qwen2_audio'
+            module = importlib.import_module(f".{module_name}", "transformers.models") #<module 'transformers.models.clipseg' from '/home/ang/桌面/hugging_face/transformers/src/transformers/models/clipseg/__init__.py'>
             try:
                 return getattr(module, class_name)
             except AttributeError:
@@ -414,13 +414,13 @@ class AutoProcessor:
             processor_auto_map = config.auto_map["AutoProcessor"]
 
         return processor_class, processor_auto_map, config
-
+    # 本类 模型名字 关键字（空）
     @classmethod
     @replace_list_option_in_docstrings(PROCESSOR_MAPPING_NAMES)
     def from_pretrained(cls, model_name_or_path, **kwargs):
 
         # 获取其他可能的配置和参数
-        config = kwargs.pop("config", None) #理解为参数配置
+        config = kwargs.pop("config", None) #none
         trust_remote_code = kwargs.pop("trust_remote_code", None) #none
         kwargs["_from_auto"] = True  # 设置标志
 
@@ -430,7 +430,7 @@ class AutoProcessor:
         # 封装的加载逻辑
         processor_class, processor_auto_map = cls._load_processor_config(
             model_name_or_path, kwargs, get_file_from_repo_kwargs
-        )
+        ) #'CIDAS/clipseg-rd64-refined' {'_from_auto': True} {}
 
         if processor_class is None: #使用其他方式获取
             processor_class, processor_auto_map = cls._load_alternative_configs(
@@ -442,14 +442,14 @@ class AutoProcessor:
                 model_name_or_path, kwargs, get_file_from_repo_kwargs
             )
 
-        if processor_class is None:
+        if processor_class is None: #str
             processor_class, processor_auto_map, config = cls._load_from_config(
                 model_name_or_path, kwargs, config, trust_remote_code
             )
 
         # 如果找到了处理器类，通过类名加载它
         if processor_class is not None:
-            processor_class = Instantiation_processor_class(processor_class) #探寻内存空间
+            processor_class = Instantiation_processor_class(processor_class) #探寻内存空间 <class 'transformers.models.clipseg.processing_clipseg.CLIPSegProcessor'>
 
         # 判断是否存在远程代码支持
         has_remote_code = processor_auto_map!=None #没有远程代码

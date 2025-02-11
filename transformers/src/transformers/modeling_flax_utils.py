@@ -55,7 +55,7 @@ from .utils import (
     logging,
     replace_return_docstrings,
 )
-from .utils.hub import convert_file_size_to_int, download_checkpoint_shard_files
+from .utils.hub import convert_file_size_to_int, get_checkpoint_shard_files
 from .utils.import_utils import is_safetensors_available
 
 
@@ -873,7 +873,7 @@ class FlaxPreTrainedModel(PushToHubMixin, FlaxGenerationMixin):
         # We'll need to download and cache each checkpoint shard if the checkpoint is sharded.
         if is_sharded:
             # resolved_archive_file becomes a list of files that point to the different checkpoint shards in this case.
-            resolved_archive_file, _ = download_checkpoint_shard_files(
+            resolved_archive_file, _ = get_checkpoint_shard_files(
                 model_name_or_path,
                 resolved_archive_file,
                 cache_dir=cache_dir,

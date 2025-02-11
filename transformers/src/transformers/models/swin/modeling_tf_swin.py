@@ -1057,8 +1057,8 @@ class TFSwinEncoder(keras.layers.Layer):
 
         return TFSwinEncoderOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
             reshaped_hidden_states=all_reshaped_hidden_states,
         )
 
@@ -1285,8 +1285,8 @@ class TFSwinMainLayer(keras.layers.Layer):
         return TFSwinModelOutput(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
             reshaped_hidden_states=encoder_outputs.reshaped_hidden_states,
         )
 

@@ -504,7 +504,7 @@ class SwiftFormerModel(SwiftFormerPreTrainedModel):
 
         return BaseModelOutputWithNoAttention(
             last_hidden_state=encoder_outputs.last_hidden_state,
-            hidden_states=encoder_outputs.hidden_states,
+            all_hidden_states=encoder_outputs.all_hidden_states,
         )
 
 

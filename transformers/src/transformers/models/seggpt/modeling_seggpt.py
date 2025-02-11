@@ -519,8 +519,8 @@ class SegGptEncoder(nn.Module):
             )
         return SegGptEncoderOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
             intermediate_hidden_states=intermediate_hidden_states,
         )
 

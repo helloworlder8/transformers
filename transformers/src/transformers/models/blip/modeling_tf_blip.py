@@ -76,7 +76,7 @@ class TFBlipForConditionalGenerationModelOutput(ModelOutput):
             Languge modeling loss from the text decoder.
         logits (`tf.Tensor` of shape `(batch_size, sequence_length, config.vocab_size)`, *optional*):
             Prediction scores of the language modeling head of the text decoder model.
-        image_embeds (`tf.Tensor` of shape `(batch_size, output_dim)`, *optional*):
+        vision_embeds (`tf.Tensor` of shape `(batch_size, output_dim)`, *optional*):
             The image embeddings obtained after applying the Vision Transformer model to the input image.
         last_hidden_state (`tf.Tensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
             Sequence of hidden-states at the output of the last layer of the model.
@@ -95,7 +95,7 @@ class TFBlipForConditionalGenerationModelOutput(ModelOutput):
 
     loss: Tuple[tf.Tensor] | None = None
     logits: Tuple[tf.Tensor] | None = None
-    image_embeds: tf.Tensor | None = None
+    vision_embeds: tf.Tensor | None = None
     last_hidden_state: tf.Tensor = None
     hidden_states: Tuple[tf.Tensor, ...] | None = None
     attentions: Tuple[tf.Tensor, ...] | None = None
@@ -119,7 +119,7 @@ class TFBlipTextVisionModelOutput(ModelOutput):
     Args:
         loss (`tf.Tensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
             Languge modeling loss from the text decoder.
-        image_embeds (`tf.Tensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
+        vision_embeds (`tf.Tensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
             The image embeddings obtained by applying the projection layer to the pooler_output.
         last_hidden_state (`tf.Tensor` of shape `(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the output of the last layer of the model.
@@ -137,7 +137,7 @@ class TFBlipTextVisionModelOutput(ModelOutput):
     """
 
     loss: tf.Tensor | None = None
-    image_embeds: tf.Tensor | None = None
+    vision_embeds: tf.Tensor | None = None
     last_hidden_state: tf.Tensor = None
     hidden_states: Tuple[tf.Tensor, ...] | None = None
     attentions: Tuple[tf.Tensor, ...] | None = None
@@ -155,7 +155,7 @@ class TFBlipImageTextMatchingModelOutput(ModelOutput):
             The image-text similarity scores.
         loss (`tf.Tensor` of shape `(1,)`, *optional*, returned when `labels` is provided):
             Languge modeling loss from the text decoder.
-        image_embeds (`tf.Tensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
+        vision_embeds (`tf.Tensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
             The image embeddings obtained by applying the projection layer to the pooler_output.
         last_hidden_state (`tf.Tensor` of shape `(batch_size, sequence_length, hidden_size)`):
             Sequence of hidden-states at the output of the last layer of the model.
@@ -178,7 +178,7 @@ class TFBlipImageTextMatchingModelOutput(ModelOutput):
 
     itm_score: tf.Tensor | None = None
     loss: tf.Tensor | None = None
-    image_embeds: tf.Tensor | None = None
+    vision_embeds: tf.Tensor | None = None
     last_hidden_state: tf.Tensor = None
     hidden_states: Tuple[tf.Tensor, ...] | None = None
     vision_pooler_output: tf.Tensor | None = None
@@ -193,14 +193,14 @@ class TFBlipOutput(ModelOutput):
         loss (`tf.Tensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
             Contrastive loss for image-text similarity.
         logits_per_image:(`tf.Tensor` of shape `(image_batch_size, text_batch_size)`):
-            The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
+            The scaled dot product scores between `vision_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
         logits_per_text:(`tf.Tensor` of shape `(text_batch_size, image_batch_size)`):
-            The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
+            The scaled dot product scores between `text_embeds` and `vision_embeds`. This represents the text-image
             similarity scores.
         text_embeds(`tf.Tensor` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of [`BlipTextModel`].
-        image_embeds(`tf.Tensor` of shape `(batch_size, output_dim`):
+        vision_embeds(`tf.Tensor` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of [`BlipVisionModel`].
         text_model_output(`BaseModelOutputWithPooling`):
             The output of the [`BlipTextModel`].
@@ -212,7 +212,7 @@ class TFBlipOutput(ModelOutput):
     logits_per_image: tf.Tensor = None
     logits_per_text: tf.Tensor = None
     text_embeds: tf.Tensor = None
-    image_embeds: tf.Tensor = None
+    vision_embeds: tf.Tensor = None
     text_model_output: TFBaseModelOutputWithPooling = None
     vision_model_output: TFBaseModelOutputWithPooling = None
 
@@ -680,7 +680,7 @@ class TFBlipEncoder(keras.layers.Layer):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return TFBaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
     def build(self, input_shape=None):
@@ -765,8 +765,8 @@ class TFBlipVisionModel(TFBlipPreTrainedModel):
         return TFBaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def get_input_embeddings(self):
@@ -892,19 +892,19 @@ class TFBlipMainLayer(keras.layers.Layer):
             training=training,
         )
 
-        image_embeds = vision_outputs[1]
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / tf.norm(image_embeds, ord=2, axis=-1, keepdims=True)
+        vision_embeds = vision_embeds / tf.norm(vision_embeds, ord=2, axis=-1, keepdims=True)
         text_embeds = text_embeds / tf.norm(text_embeds, ord=2, axis=-1, keepdims=True)
 
         # cosine similarity as logits
         logit_scale = tf.exp(self.logit_scale)
-        logits_per_text = tf.matmul(text_embeds, image_embeds, transpose_b=True) * logit_scale
+        logits_per_text = tf.matmul(text_embeds, vision_embeds, transpose_b=True) * logit_scale
         logits_per_image = tf.transpose(logits_per_text)
 
         loss = None
@@ -913,7 +913,7 @@ class TFBlipMainLayer(keras.layers.Layer):
             loss = tf.reshape(loss, (1,))
 
         if not return_dict:
-            output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
 
         return TFBlipOutput(
@@ -921,7 +921,7 @@ class TFBlipMainLayer(keras.layers.Layer):
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )
@@ -942,7 +942,7 @@ class TFBlipModel(TFBlipPreTrainedModel):
             logits_per_image=output.logits_per_image,
             logits_per_text=output.logits_per_text,
             text_embeds=output.text_embeds,
-            image_embeds=output.image_embeds,
+            vision_embeds=output.vision_embeds,
         )
 
     @unpack_inputs
@@ -1153,19 +1153,19 @@ class TFBlipForConditionalGeneration(TFBlipPreTrainedModel):
             training=training,
         )
 
-        image_embeds = vision_outputs[0]
+        vision_embeds = vision_outputs[0]
 
         outputs = self.text_decoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             labels=labels,
             return_dict=False,
             training=training,
         )
 
         if not return_dict:
-            outputs = (outputs[0], outputs[1], image_embeds, vision_outputs[0]) + vision_outputs[2:]
+            outputs = (outputs[0], outputs[1], vision_embeds, vision_outputs[0]) + vision_outputs[2:]
             return tuple(output for output in outputs if output is not None)
 
         if labels is not None:
@@ -1181,7 +1181,7 @@ class TFBlipForConditionalGeneration(TFBlipPreTrainedModel):
         return TFBlipForConditionalGenerationModelOutput(
             loss=loss,
             logits=logits,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             last_hidden_state=vision_outputs.last_hidden_state,
             hidden_states=vision_outputs.hidden_states,
             attentions=vision_outputs.attentions,
@@ -1229,9 +1229,9 @@ class TFBlipForConditionalGeneration(TFBlipPreTrainedModel):
         batch_size = pixel_values.shape[0]
         vision_outputs = self.vision_model(pixel_values=pixel_values)
 
-        image_embeds = vision_outputs[0]
+        vision_embeds = vision_outputs[0]
 
-        image_attention_mask = tf.ones(shape_list(image_embeds)[:-1], dtype=tf.int32)
+        image_attention_mask = tf.ones(shape_list(vision_embeds)[:-1], dtype=tf.int32)
 
         if isinstance(input_ids, list):
             input_ids = tf.convert_to_tensor(input_ids, dtype=tf.int32)
@@ -1253,7 +1253,7 @@ class TFBlipForConditionalGeneration(TFBlipPreTrainedModel):
             eos_token_id=self.config.text_config.sep_token_id,
             pad_token_id=self.config.text_config.pad_token_id,
             attention_mask=attention_mask,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             encoder_attention_mask=image_attention_mask,
             **generate_kwargs,
         )
@@ -1389,13 +1389,13 @@ class TFBlipForQuestionAnswering(TFBlipPreTrainedModel):
             training=training,
         )
 
-        image_embeds = vision_outputs[0]
-        image_attention_mask = tf.ones(shape_list(image_embeds)[:-1], dtype=tf.int64)
+        vision_embeds = vision_outputs[0]
+        image_attention_mask = tf.ones(shape_list(vision_embeds)[:-1], dtype=tf.int64)
 
         question_embeds = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             encoder_attention_mask=image_attention_mask,
             return_dict=return_dict,
             training=training,
@@ -1423,12 +1423,12 @@ class TFBlipForQuestionAnswering(TFBlipPreTrainedModel):
             decoder_loss = None
 
         if not return_dict:
-            outputs = (decoder_loss, image_embeds, vision_outputs[0]) + vision_outputs[2:]
+            outputs = (decoder_loss, vision_embeds, vision_outputs[0]) + vision_outputs[2:]
             return tuple(output for output in outputs if output is not None)
 
         return TFBlipTextVisionModelOutput(
             loss=decoder_loss,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             last_hidden_state=vision_outputs.last_hidden_state,
             hidden_states=vision_outputs.hidden_states,
             attentions=vision_outputs.attentions,
@@ -1478,9 +1478,9 @@ class TFBlipForQuestionAnswering(TFBlipPreTrainedModel):
         """
         vision_outputs = self.vision_model(pixel_values=pixel_values)
 
-        image_embeds = vision_outputs[0]
+        vision_embeds = vision_outputs[0]
 
-        image_attention_mask = tf.ones(shape_list(image_embeds)[:-1], dtype=tf.int32)
+        image_attention_mask = tf.ones(shape_list(vision_embeds)[:-1], dtype=tf.int32)
 
         if isinstance(input_ids, list):
             input_ids = tf.Tensor(input_ids)
@@ -1488,7 +1488,7 @@ class TFBlipForQuestionAnswering(TFBlipPreTrainedModel):
         question_outputs = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             encoder_attention_mask=image_attention_mask,
             return_dict=False,
         )
@@ -1624,8 +1624,8 @@ class TFBlipForImageTextRetrieval(TFBlipPreTrainedModel):
             training=training,
         )
 
-        image_embeds = vision_outputs[0]
-        image_atts = tf.ones(shape_list(image_embeds)[:-1], dtype=tf.int64)
+        vision_embeds = vision_outputs[0]
+        image_atts = tf.ones(shape_list(vision_embeds)[:-1], dtype=tf.int64)
 
         # Matt: In PyTorch, only one path (itm/non-itm) is taken. However, in TensorFlow this can result in
         # some layers not being built! To avoid this, we always call both paths, then use an if statement to select
@@ -1634,7 +1634,7 @@ class TFBlipForImageTextRetrieval(TFBlipPreTrainedModel):
         itm_question_embeds = self.text_encoder(
             input_ids=input_ids,
             attention_mask=attention_mask,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             encoder_attention_mask=image_atts,
             return_dict=return_dict,
             training=training,
@@ -1653,7 +1653,7 @@ class TFBlipForImageTextRetrieval(TFBlipPreTrainedModel):
             no_itm_question_embeds[0] if not return_dict else no_itm_question_embeds.last_hidden_state
         )
 
-        image_feat, _ = tf.linalg.normalize(self.vision_proj(image_embeds[:, 0, :]), ord=2, axis=-1)
+        image_feat, _ = tf.linalg.normalize(self.vision_proj(vision_embeds[:, 0, :]), ord=2, axis=-1)
         text_feat, _ = tf.linalg.normalize(self.text_proj(no_itm_question_embeds[:, 0, :]), ord=2, axis=-1)
 
         no_itm_output = tf.matmul(image_feat, text_feat, transpose_b=True)

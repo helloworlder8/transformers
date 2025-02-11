@@ -1785,6 +1785,6 @@ class OmDetTurboForObjectDetection(OmDetTurboPreTrainedModel):
             encoder_extracted_states=encoder_outputs.extracted_states,
             decoder_hidden_states=decoder_outputs.hidden_states,
             decoder_attentions=decoder_outputs.attentions,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )

@@ -928,6 +928,6 @@ class DecisionTransformerModel(DecisionTransformerPreTrainedModel):
             state_preds=state_preds,
             action_preds=action_preds,
             return_preds=return_preds,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )

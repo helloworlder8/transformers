@@ -777,8 +777,8 @@ class HieraEncoder(nn.Module):
             )
         return HieraEncoderOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
             reshaped_hidden_states=all_reshaped_hidden_states,
         )
 
@@ -1040,8 +1040,8 @@ class HieraModel(HieraPreTrainedModel):
             pooler_output=pooled_output,
             bool_masked_pos=bool_masked_pos,
             ids_restore=ids_restore,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
             reshaped_hidden_states=encoder_outputs.reshaped_hidden_states,
         )
 

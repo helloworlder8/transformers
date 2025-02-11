@@ -2676,32 +2676,33 @@ class PreTrainedTokenizerBase(SpecialTokensMixin, PushToHubMixin):
             "return_length": return_length,
             "split_special_tokens": kwargs.pop("split_special_tokens", self.split_special_tokens),
             "verbose": verbose,
-            **kwargs,
         }
-
+        all_kwargs.update(kwargs)
         if text is None and text_target is None:
             raise ValueError("You need to specify either `text` or `text_target`.")
 
-        encodings = None
-        target_encodings = None
+        encodings, target_encodings = None, None
 
+        # 处理输入文本
         if text is not None:
             if not self._in_target_context_manager:
                 self._switch_to_input_mode()
-            encodings = self._call_one(text=text, text_pair=text_pair, **all_kwargs) # input_ids token_type_ids attention_mask
+            encodings = self._call_one(text=text, text_pair=text_pair, **all_kwargs)
 
+        # 处理目标文本
         if text_target is not None:
             self._switch_to_target_mode()
             target_encodings = self._call_one(text=text_target, text_pair=text_pair_target, **all_kwargs)
 
-        self._switch_to_input_mode()  # Reset to input mode after processing
+        # 切换回输入模式
+        self._switch_to_input_mode()
 
+        # 返回编码结果
         if text_target is None:
             return encodings
         if text is None:
             return target_encodings
 
-        # Combine encodings and target encodings
         encodings["labels"] = target_encodings["input_ids"]
         return encodings
 

@@ -166,14 +166,14 @@ class AltCLIPOutput(ModelOutput):
         loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
             Contrastive loss for image-text similarity.
         logits_per_image (`torch.FloatTensor` of shape `(image_batch_size, text_batch_size)`):
-            The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
+            The scaled dot product scores between `vision_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
         logits_per_text (`torch.FloatTensor` of shape `(text_batch_size, image_batch_size)`):
-            The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
+            The scaled dot product scores between `text_embeds` and `vision_embeds`. This represents the text-image
             similarity scores.
         text_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of [`AltCLIPTextModel`].
-        image_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
+        vision_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of [`AltCLIPVisionModel`].
         text_model_output (`BaseModelOutputWithPooling`):
             The output of the [`AltCLIPTextModel`].
@@ -185,7 +185,7 @@ class AltCLIPOutput(ModelOutput):
     logits_per_image: torch.FloatTensor = None
     logits_per_text: torch.FloatTensor = None
     text_embeds: torch.FloatTensor = None
-    image_embeds: torch.FloatTensor = None
+    vision_embeds: torch.FloatTensor = None
     text_model_output: BaseModelOutputWithPooling = None
     vision_model_output: BaseModelOutputWithPooling = None
 
@@ -985,7 +985,7 @@ class AltCLIPEncoder(nn.Module):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
 
@@ -1184,8 +1184,8 @@ class AltCLIPVisionTransformer(nn.Module):
         return BaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -1416,8 +1416,8 @@ class AltRobertaModel(AltCLIPPreTrainedModel):
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
             past_key_values=encoder_outputs.past_key_values,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
@@ -1704,19 +1704,19 @@ class AltCLIPModel(AltCLIPPreTrainedModel):
             return_dict=return_dict,
         )
 
-        image_embeds = vision_outputs[1]
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / image_embeds.norm(p=2, dim=-1, keepdim=True)
+        vision_embeds = vision_embeds / vision_embeds.norm(p=2, dim=-1, keepdim=True)
         text_embeds = text_embeds / text_embeds.norm(p=2, dim=-1, keepdim=True)
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
-        logits_per_text = torch.matmul(text_embeds, image_embeds.t()) * logit_scale
+        logits_per_text = torch.matmul(text_embeds, vision_embeds.t()) * logit_scale
         logits_per_image = logits_per_text.T
 
         loss = None
@@ -1724,7 +1724,7 @@ class AltCLIPModel(AltCLIPPreTrainedModel):
             loss = clip_loss(logits_per_text)
 
         if not return_dict:
-            output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
 
         return AltCLIPOutput(
@@ -1732,7 +1732,7 @@ class AltCLIPModel(AltCLIPPreTrainedModel):
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

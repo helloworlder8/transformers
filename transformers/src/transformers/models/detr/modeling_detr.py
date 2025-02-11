@@ -981,7 +981,7 @@ class DetrEncoder(DetrPreTrainedModel):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
 
@@ -1323,8 +1323,8 @@ class DetrModel(DetrPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
             intermediate_hidden_states=decoder_outputs.intermediate_hidden_states,
         )
 
@@ -1689,8 +1689,8 @@ class DetrForSegmentation(DetrPreTrainedModel):
             decoder_attentions=decoder_outputs.attentions,
             cross_attentions=decoder_outputs.cross_attentions,
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
-            encoder_hidden_states=encoder_outputs.hidden_states,
-            encoder_attentions=encoder_outputs.attentions,
+            encoder_all_hidden_states=encoder_outputs.all_hidden_states,
+            encoder_all_attentions=encoder_outputs.all_attentions,
         )
 
 

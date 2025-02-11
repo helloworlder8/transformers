@@ -1009,8 +1009,8 @@ class TFMobileBertMainLayer(keras.layers.Layer):
         return TFBaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def build(self, input_shape=None):

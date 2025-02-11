@@ -245,7 +245,7 @@ class ViTImageProcessor(BaseImageProcessor):
             images = [convert_to_rgb(image) for image in images]
 
         # All transformations expect numpy arrays.
-        images = [to_numpy_array(image) for image in images]
+        images = [to_numpy_array(image) for image in images] #[3*(480, 640, 3)]
 
         if is_scaled_image(images[0]) and do_rescale:
             logger.warning_once(
@@ -274,10 +274,10 @@ class ViTImageProcessor(BaseImageProcessor):
                 self.normalize(image=image, mean=image_mean, std=image_std, input_data_format=input_data_format)
                 for image in images
             ]
-
+        # ->[3*(352, 352, 3)]
         images = [
             to_channel_dimension_format(image, data_format, input_channel_dim=input_data_format) for image in images
         ]
-
+        # ->[3*(3, 352, 352)]
         data = {"pixel_values": images}
         return BatchFeature(data=data, tensor_type=return_tensors)

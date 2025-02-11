@@ -224,10 +224,10 @@ class TFGroupViTModelOutput(ModelOutput):
         loss (`tf.Tensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
             Contrastive loss for image-text similarity.
         logits_per_image (`tf.Tensor` of shape `(image_batch_size, text_batch_size)`):
-            The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
+            The scaled dot product scores between `vision_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
         logits_per_text (`tf.Tensor` of shape `(text_batch_size, image_batch_size)`):
-            The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
+            The scaled dot product scores between `text_embeds` and `vision_embeds`. This represents the text-image
             similarity scores.
         segmentation_logits (`tf.Tensor` of shape `(batch_size, config.num_labels, logits_height, logits_width)`):
             Classification scores for each pixel.
@@ -243,7 +243,7 @@ class TFGroupViTModelOutput(ModelOutput):
         text_embeds (`tf.Tensor` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of
             [`TFGroupViTTextModel`].
-        image_embeds (`tf.Tensor` of shape `(batch_size, output_dim`):
+        vision_embeds (`tf.Tensor` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of
             [`TFGroupViTVisionModel`].
         text_model_output (`TFBaseModelOutputWithPooling`):
@@ -257,7 +257,7 @@ class TFGroupViTModelOutput(ModelOutput):
     logits_per_text: tf.Tensor = None
     segmentation_logits: tf.Tensor = None
     text_embeds: tf.Tensor = None
-    image_embeds: tf.Tensor = None
+    vision_embeds: tf.Tensor = None
     text_model_output: TFBaseModelOutputWithPooling = None
     vision_model_output: TFBaseModelOutputWithPooling = None
 
@@ -1085,7 +1085,7 @@ class TFGroupViTTextEncoder(keras.layers.Layer):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return TFBaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
     def build(self, input_shape=None):
@@ -1238,8 +1238,8 @@ class TFGroupViTTextTransformer(keras.layers.Layer):
         return TFBaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def _build_causal_attention_mask(self, batch_size, seq_length, dtype=tf.float32):
@@ -1314,8 +1314,8 @@ class TFGroupViTVisionTransformer(keras.layers.Layer):
         return TFBaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def build(self, input_shape=None):
@@ -1618,21 +1618,21 @@ class TFGroupViTMainLayer(keras.layers.Layer):
             training=training,
         )
 
-        image_embeds = vision_outputs[1]
+        vision_embeds = vision_outputs[1]
         for layer in self.visual_projection:
-            image_embeds = layer(image_embeds)
+            vision_embeds = layer(vision_embeds)
 
         text_embeds = text_outputs[1]
         for layer in self.text_projection:
             text_embeds = layer(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / tf.norm(image_embeds, axis=-1, keepdims=True)
+        vision_embeds = vision_embeds / tf.norm(vision_embeds, axis=-1, keepdims=True)
         text_embeds = text_embeds / tf.norm(text_embeds, axis=-1, keepdims=True)
 
         # cosine similarity as logits
         logit_scale = tf.math.exp(self.logit_scale)
-        logits_per_text = tf.matmul(text_embeds, image_embeds, transpose_b=True) * logit_scale
+        logits_per_text = tf.matmul(text_embeds, vision_embeds, transpose_b=True) * logit_scale
         logits_per_image = tf.transpose(logits_per_text)
 
         seg_logits = None
@@ -1659,7 +1659,7 @@ class TFGroupViTMainLayer(keras.layers.Layer):
             logits_per_image_group = tf.matmul(image_group_embeds, text_embeds, transpose_b=True) * logit_scale
             # [batch_size_image, batch_size_text, num_group]
             logits_per_image_group = tf.reshape(
-                logits_per_image_group, shape=(image_embeds.shape[0], -1, text_embeds.shape[0])
+                logits_per_image_group, shape=(vision_embeds.shape[0], -1, text_embeds.shape[0])
             )
             logits_per_image_group = tf.transpose(logits_per_image_group, perm=(0, 2, 1))
 
@@ -1683,12 +1683,12 @@ class TFGroupViTMainLayer(keras.layers.Layer):
                     logits_per_text,
                     seg_logits,
                     text_embeds,
-                    image_embeds,
+                    vision_embeds,
                     text_outputs,
                     vision_outputs,
                 )
             else:
-                output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+                output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
 
         return TFGroupViTModelOutput(
@@ -1697,7 +1697,7 @@ class TFGroupViTMainLayer(keras.layers.Layer):
             logits_per_text=logits_per_text,
             segmentation_logits=seg_logits,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

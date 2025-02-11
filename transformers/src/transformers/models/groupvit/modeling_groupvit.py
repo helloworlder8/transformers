@@ -273,10 +273,10 @@ class GroupViTModelOutput(ModelOutput):
         loss (`torch.FloatTensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
             Contrastive loss for image-text similarity.
         logits_per_image (`torch.FloatTensor` of shape `(image_batch_size, text_batch_size)`):
-            The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
+            The scaled dot product scores between `vision_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
         logits_per_text (`torch.FloatTensor` of shape `(text_batch_size, image_batch_size)`):
-            The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
+            The scaled dot product scores between `text_embeds` and `vision_embeds`. This represents the text-image
             similarity scores.
         segmentation_logits (`torch.FloatTensor` of shape `(batch_size, config.num_labels, logits_height, logits_width)`):
             Classification scores for each pixel.
@@ -292,7 +292,7 @@ class GroupViTModelOutput(ModelOutput):
         text_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of
             [`GroupViTTextModel`].
-        image_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
+        vision_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of
             [`GroupViTVisionModel`].
         text_model_output (`BaseModelOutputWithPooling`):
@@ -306,7 +306,7 @@ class GroupViTModelOutput(ModelOutput):
     logits_per_text: torch.FloatTensor = None
     segmentation_logits: torch.FloatTensor = None
     text_embeds: torch.FloatTensor = None
-    image_embeds: torch.FloatTensor = None
+    vision_embeds: torch.FloatTensor = None
     text_model_output: BaseModelOutputWithPooling = None
     vision_model_output: BaseModelOutputWithPooling = None
 
@@ -1035,7 +1035,7 @@ class GroupViTTextEncoder(nn.Module):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
 
@@ -1131,8 +1131,8 @@ class GroupViTTextTransformer(nn.Module):
         return BaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -1242,8 +1242,8 @@ class GroupViTVisionTransformer(nn.Module):
         return BaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -1508,19 +1508,19 @@ class GroupViTModel(GroupViTPreTrainedModel):
             return_dict=return_dict,
         )
 
-        image_embeds = vision_outputs[1]
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / image_embeds.norm(dim=-1, keepdim=True)
+        vision_embeds = vision_embeds / vision_embeds.norm(dim=-1, keepdim=True)
         text_embeds = text_embeds / text_embeds.norm(dim=-1, keepdim=True)
 
         # cosine similarity as logits
         logit_scale = self.logit_scale.exp()
-        logits_per_text = torch.matmul(text_embeds, image_embeds.t()) * logit_scale
+        logits_per_text = torch.matmul(text_embeds, vision_embeds.t()) * logit_scale
         logits_per_image = logits_per_text.t()
 
         seg_logits = None
@@ -1543,7 +1543,7 @@ class GroupViTModel(GroupViTPreTrainedModel):
             logits_per_image_group = torch.matmul(image_group_embeds, text_embeds.t()) * logit_scale
             # [batch_size_image, batch_size_text, num_group]
             logits_per_image_group = logits_per_image_group.reshape(
-                image_embeds.shape[0], -1, text_embeds.shape[0]
+                vision_embeds.shape[0], -1, text_embeds.shape[0]
             ).permute(0, 2, 1)
 
             # [batch_size_image, batch_size_text, height x width]
@@ -1566,12 +1566,12 @@ class GroupViTModel(GroupViTPreTrainedModel):
                     logits_per_text,
                     seg_logits,
                     text_embeds,
-                    image_embeds,
+                    vision_embeds,
                     text_outputs,
                     vision_outputs,
                 )
             else:
-                output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+                output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
 
         return GroupViTModelOutput(
@@ -1580,7 +1580,7 @@ class GroupViTModel(GroupViTPreTrainedModel):
             logits_per_text=logits_per_text,
             segmentation_logits=seg_logits,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

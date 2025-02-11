@@ -391,7 +391,7 @@ class CLIPOnnxConfig(OnnxConfig):
                 ("logits_per_image", {0: "batch"}),
                 ("logits_per_text", {0: "batch"}),
                 ("text_embeds", {0: "batch"}),
-                ("image_embeds", {0: "batch"}),
+                ("vision_embeds", {0: "batch"}),
             ]
         )
 

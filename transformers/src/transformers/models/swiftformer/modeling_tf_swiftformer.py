@@ -685,7 +685,7 @@ class TFSwiftFormerMainLayer(keras.layers.Layer):
 
         return TFBaseModelOutputWithNoAttention(
             last_hidden_state=encoder_outputs.last_hidden_state,
-            hidden_states=encoder_outputs.hidden_states,
+            all_hidden_states=encoder_outputs.all_hidden_states,
         )
 
     def build(self, input_shape=None):

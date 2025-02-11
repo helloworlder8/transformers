@@ -287,8 +287,27 @@ def cached_file(
     **deprecated_kwargs,
 ) -> Optional[str]:
 
+    use_auth_token = deprecated_kwargs.pop("use_auth_token", None)
+    if use_auth_token is not None:
+        warnings.warn(
+            "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
+            FutureWarning,
+        )
+        if token is not None:
+            raise ValueError("`token` and `use_auth_token` are both specified. Please set only the argument `token`.")
+        token = use_auth_token
+
+    # Private arguments
+    #     _raise_exceptions_for_gated_repo: if False, do not raise an exception for gated repo error but return
+    #         None.
+    #     _raise_exceptions_for_missing_entries: if False, do not raise an exception for missing entries but return
+    #         None.
+    #     _raise_exceptions_for_connection_errors: if False, do not raise an exception for connection errors but return
+    #         None.
+    #     _commit_hash: passed when we are chaining several calls to various files (e.g. when loading a tokenizer or
+    #         a pipeline). If files are cached for this commit hash, avoid calls to head and get from the cache.
     if is_offline_mode() and not local_files_only:
-        logger.info("Offline mode: forcing local_files_only=True") #离线模式强制传入local_files_only=true
+        logger.info("Offline mode: forcing local_files_only=True")
         local_files_only = True
     if subfolder is None:
         subfolder = ""
@@ -308,7 +327,7 @@ def cached_file(
         return resolved_file
 
     if cache_dir is None:
-        cache_dir = TRANSFORMERS_CACHE #缓存路径
+        cache_dir = TRANSFORMERS_CACHE
     if isinstance(cache_dir, Path):
         cache_dir = str(cache_dir)
 
@@ -331,16 +350,16 @@ def cached_file(
         resolved_file = hf_hub_download(
             path_or_repo_id,
             filename,
-            subfolder=None if len(subfolder) == 0 else subfolder, #none
+            subfolder=None if len(subfolder) == 0 else subfolder,
             repo_type=repo_type,
             revision=revision,
-            cache_dir=cache_dir, #可选的缓存路径
-            user_agent=user_agent, #'transformers/4.47.0.dev0; python/3.10.0; session_id/936d5a2915f642cbb820f57a60ff9ad1; torch/2.5.1'
+            cache_dir=cache_dir,
+            user_agent=user_agent,
             force_download=force_download,
             proxies=proxies,
             resume_download=resume_download,
             token=token,
-            local_files_only=local_files_only, #false
+            local_files_only=local_files_only,
         )
     except GatedRepoError as e:
         resolved_file = _get_cache_file_to_return(path_or_repo_id, full_filename, cache_dir, revision)
@@ -903,8 +922,8 @@ def convert_file_size_to_int(size: Union[int, str]):
     raise ValueError("`size` is not in a valid format. Use an integer followed by the unit, e.g., '5GB'.")
 
 
-def download_checkpoint_shard_files(
-    model_name_or_path,
+def get_checkpoint_shard_files(
+    pretrained_model_name_or_path,
     index_filename,
     cache_dir=None,
     force_download=False,
@@ -921,12 +940,12 @@ def download_checkpoint_shard_files(
     """
     For a given model:
 
-    - download and cache all the shards of a sharded checkpoint if `model_name_or_path` is a model ID on the
+    - download and cache all the shards of a sharded checkpoint if `pretrained_model_name_or_path` is a model ID on the
       Hub
     - returns the list of paths to all the shards, as well as some metadata.
 
     For the description of each arg, see [`PreTrainedModel.from_pretrained`]. `index_filename` is the full path to the
-    index (downloaded and cached if `model_name_or_path` is a model ID on the Hub).
+    index (downloaded and cached if `pretrained_model_name_or_path` is a model ID on the Hub).
     """
     import json
 
@@ -941,7 +960,7 @@ def download_checkpoint_shard_files(
         token = use_auth_token
 
     if not os.path.isfile(index_filename):
-        raise ValueError(f"Can't find a checkpoint index ({index_filename}) in {model_name_or_path}.")
+        raise ValueError(f"Can't find a checkpoint index ({index_filename}) in {pretrained_model_name_or_path}.")
 
     with open(index_filename, "r") as f:
         index = json.loads(f.read())
@@ -952,23 +971,23 @@ def download_checkpoint_shard_files(
     sharded_metadata["weight_map"] = index["weight_map"].copy()
 
     # First, let's deal with local folder.
-    if os.path.isdir(model_name_or_path):
-        shard_filenames = [os.path.join(model_name_or_path, subfolder, f) for f in shard_filenames]
+    if os.path.isdir(pretrained_model_name_or_path):
+        shard_filenames = [os.path.join(pretrained_model_name_or_path, subfolder, f) for f in shard_filenames]
         return shard_filenames, sharded_metadata
 
-    # At this stage model_name_or_path is a model identifier on the Hub
+    # At this stage pretrained_model_name_or_path is a model identifier on the Hub
     cached_filenames = []
     # Check if the model is already cached or not. We only try the last checkpoint, this should cover most cases of
     # downloaded (if interrupted).
     last_shard = try_to_load_from_cache(
-        model_name_or_path, shard_filenames[-1], cache_dir=cache_dir, revision=_commit_hash
+        pretrained_model_name_or_path, shard_filenames[-1], cache_dir=cache_dir, revision=_commit_hash
     )
     show_progress_bar = last_shard is None or force_download
     for shard_filename in tqdm(shard_filenames, desc="Downloading shards", disable=not show_progress_bar):
         try:
             # Load from URL
             cached_filename = cached_file(
-                model_name_or_path,
+                pretrained_model_name_or_path,
                 shard_filename,
                 cache_dir=cache_dir,
                 force_download=force_download,
@@ -985,7 +1004,7 @@ def download_checkpoint_shard_files(
         # we don't have to catch them here.
         except EntryNotFoundError:
             raise EnvironmentError(
-                f"{model_name_or_path} does not appear to have a file named {shard_filename} which is "
+                f"{pretrained_model_name_or_path} does not appear to have a file named {shard_filename} which is "
                 "required according to the checkpoint index."
             )
         except HTTPError:

@@ -1094,8 +1094,8 @@ class DebertaV2Model(DebertaV2PreTrainedModel):
 
         return BaseModelOutput(
             last_hidden_state=sequence_output,
-            hidden_states=encoder_outputs.hidden_states if output_hidden_states else None,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states if output_hidden_states else None,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 

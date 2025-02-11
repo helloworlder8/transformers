@@ -427,19 +427,19 @@ class TFVisionTextDualEncoderModel(TFPreTrainedModel):
             training=training,
         )
 
-        image_embeds = vision_outputs[1]  # pooler_output
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]  # pooler_output
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]  # pooler_output
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / tf.norm(image_embeds, axis=-1, keepdims=True)
+        vision_embeds = vision_embeds / tf.norm(vision_embeds, axis=-1, keepdims=True)
         text_embeds = text_embeds / tf.norm(text_embeds, axis=-1, keepdims=True)
 
         # cosine similarity as logits
         logit_scale = tf.math.exp(self.logit_scale)
-        logits_per_text = tf.matmul(text_embeds, image_embeds, transpose_b=True) * logit_scale
+        logits_per_text = tf.matmul(text_embeds, vision_embeds, transpose_b=True) * logit_scale
         logits_per_image = tf.transpose(logits_per_text)
 
         loss = None
@@ -449,7 +449,7 @@ class TFVisionTextDualEncoderModel(TFPreTrainedModel):
                 loss = tf.expand_dims(loss, 0)
 
         if not return_dict:
-            output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return ((loss,) + output) if loss is not None else output
 
         return TFCLIPOutput(
@@ -457,7 +457,7 @@ class TFVisionTextDualEncoderModel(TFPreTrainedModel):
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

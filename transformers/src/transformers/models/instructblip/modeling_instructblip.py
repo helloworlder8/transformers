@@ -527,7 +527,7 @@ class InstructBlipEncoder(nn.Module):
         if not return_dict:
             return tuple(v for v in [hidden_states, encoder_states, all_attentions] if v is not None)
         return BaseModelOutput(
-            last_hidden_state=hidden_states, hidden_states=encoder_states, attentions=all_attentions
+            last_hidden_state=hidden_states, all_hidden_states=encoder_states, all_attentions=all_attentions
         )
 
 
@@ -591,8 +591,8 @@ class InstructBlipVisionModel(InstructBlipPreTrainedModel):
         return BaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def get_input_embeddings(self):
@@ -1268,8 +1268,8 @@ class InstructBlipQFormerModel(InstructBlipPreTrainedModel):
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
             past_key_values=encoder_outputs.past_key_values,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
             cross_attentions=encoder_outputs.cross_attentions,
         )
 
@@ -1429,14 +1429,14 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel, Generati
             return_dict=return_dict,
             interpolate_pos_encoding=interpolate_pos_encoding,
         )
-        image_embeds = vision_outputs[0]
+        vision_embeds = vision_outputs[0]
 
         # step 2: forward the query tokens through the QFormer, using the image embeddings for cross-attention
-        image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        image_attention_mask = torch.ones(vision_embeds.size()[:-1], dtype=torch.long, device=vision_embeds.device)
 
         # difference with BLIP-2 here: we also feed the instruction prompt to the Q-Former
-        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-        query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        query_tokens = self.query_tokens.expand(vision_embeds.shape[0], -1, -1)
+        query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=vision_embeds.device)
         if qformer_attention_mask is None:
             qformer_attention_mask = torch.ones_like(qformer_input_ids)
         qformer_attention_mask = torch.cat([query_attention_mask, qformer_attention_mask], dim=1)
@@ -1444,7 +1444,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel, Generati
             input_ids=qformer_input_ids,
             attention_mask=qformer_attention_mask,
             query_embeds=query_tokens,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             encoder_attention_mask=image_attention_mask,
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
@@ -1562,16 +1562,16 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel, Generati
             self._preprocess_accelerate()
 
         batch_size = pixel_values.shape[0]
-        image_embeds = self.vision_model(
+        vision_embeds = self.vision_model(
             pixel_values,
             return_dict=True,
             interpolate_pos_encoding=interpolate_pos_encoding,
         ).last_hidden_state
 
-        image_attention_mask = torch.ones(image_embeds.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        image_attention_mask = torch.ones(vision_embeds.size()[:-1], dtype=torch.long, device=vision_embeds.device)
 
-        query_tokens = self.query_tokens.expand(image_embeds.shape[0], -1, -1)
-        query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=image_embeds.device)
+        query_tokens = self.query_tokens.expand(vision_embeds.shape[0], -1, -1)
+        query_attention_mask = torch.ones(query_tokens.size()[:-1], dtype=torch.long, device=vision_embeds.device)
         if qformer_attention_mask is None:
             qformer_attention_mask = torch.ones_like(qformer_input_ids)
         qformer_attention_mask = torch.cat([query_attention_mask, qformer_attention_mask], dim=1)
@@ -1579,7 +1579,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel, Generati
             input_ids=qformer_input_ids,
             attention_mask=qformer_attention_mask,
             query_embeds=query_tokens,
-            encoder_hidden_states=image_embeds,
+            encoder_hidden_states=vision_embeds,
             encoder_attention_mask=image_attention_mask,
             return_dict=True,
         )
@@ -1594,7 +1594,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel, Generati
             input_ids = (
                 torch.LongTensor([[self.config.text_config.bos_token_id]])
                 .repeat(batch_size, 1)
-                .to(image_embeds.device)
+                .to(vision_embeds.device)
             )
         if attention_mask is None:
             attention_mask = torch.ones_like(input_ids)
@@ -1617,7 +1617,7 @@ class InstructBlipForConditionalGeneration(InstructBlipPreTrainedModel, Generati
                 [language_attention_mask, attention_mask.to(language_attention_mask.device)], dim=1
             )
 
-            # add image_embeds length to max_length, so that the final max_length in counted only on token embeds
+            # add vision_embeds length to max_length, so that the final max_length in counted only on token embeds
             # -1 is to account for the prepended BOS after `generate.`
             if not self.language_model.config.is_encoder_decoder:
                 generate_kwargs["max_length"] = (

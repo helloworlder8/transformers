@@ -10,6 +10,9 @@ __pycache__/
 
 demo/transformers-code/
 hub/
+hub_pull/
+
+
 # tests and logs
 tests/fixtures/cached_*_text.txt
 logs/

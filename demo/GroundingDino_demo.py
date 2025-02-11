@@ -17,7 +17,7 @@ image = Image.open(requests.get(image_url, stream=True).raw)
 text = "a cat. a remote control."
 device = "cuda"
 
-
+# huggingface-cli download --resume-download IDEA-Research/grounding-dino-tiny --local-dir ./ --local-dir-use-symlinks False
 from transformers import GroundingDinoProcessor
 processor = AutoProcessor.from_pretrained(model_id)
 

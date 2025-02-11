@@ -870,9 +870,9 @@ class MaskFormerSwinModel(MaskFormerSwinPreTrainedModel):
         return MaskFormerSwinModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
+            all_hidden_states=encoder_outputs.all_hidden_states,
             hidden_states_spatial_dimensions=hidden_states_spatial_dimensions,
-            attentions=encoder_outputs.attentions,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 

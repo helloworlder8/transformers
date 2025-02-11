@@ -39,62 +39,15 @@ _CHECKPOINT_FOR_DOC = "facebook/sam-vit-huge"
 
 @dataclass
 class SamVisionEncoderOutput(ModelOutput):
-    """
-    Base class for sam vision model's outputs that also contains image embeddings obtained by applying the projection
-    layer to the pooler_output.
 
-    Args:
-        image_embeds (`torch.FloatTensor` of shape `(batch_size, output_dim)` *optional* returned when model is initialized with `with_projection=True`):
-            The image embeddings obtained by applying the projection layer to the pooler_output.
-        last_hidden_state (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`):
-            Sequence of hidden-states at the output of the last layer of the model.
-        hidden_states (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the model at the output of each layer plus the optional initial embedding outputs.
-        attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
-
-    image_embeds: Optional[torch.FloatTensor] = None
+    vision_embeds: Optional[torch.FloatTensor] = None
     last_hidden_state: torch.FloatTensor = None
-    hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
-    attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
+    all_hidden_states: Optional[Tuple[torch.FloatTensor, ...]] = None
+    all_attentions: Optional[Tuple[torch.FloatTensor, ...]] = None
 
 
 @dataclass
 class SamImageSegmentationOutput(ModelOutput):
-    """
-    Base class for Segment-Anything model's output
-
-    Args:
-        iou_scores (`torch.FloatTensor` of shape `(batch_size, num_masks)`):
-            The iou scores of the predicted masks.
-        pred_masks (`torch.FloatTensor` of shape `(batch_size, num_masks, height, width)`):
-            The predicted low resolutions masks. Needs to be post-processed by the processor
-        vision_hidden_states  (`tuple(torch.FloatTensor)`, *optional*, returned when `output_hidden_states=True` is passed or when `config.output_hidden_states=True`):
-            Tuple of `torch.FloatTensor` (one for the output of the embeddings, if the model has an embedding layer, +
-            one for the output of each layer) of shape `(batch_size, sequence_length, hidden_size)`.
-
-            Hidden-states of the vision model at the output of each layer plus the optional initial embedding outputs.
-        vision_attentions  (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-        mask_decoder_attentions (`tuple(torch.FloatTensor)`, *optional*, returned when `output_attentions=True` is passed or when `config.output_attentions=True`):
-            Tuple of `torch.FloatTensor` (one for each layer) of shape `(batch_size, num_heads, sequence_length,
-            sequence_length)`.
-
-            Attentions weights after the attention softmax, used to compute the weighted average in the self-attention
-            heads.
-    """
 
     iou_scores: torch.FloatTensor = None
     pred_masks: torch.FloatTensor = None
@@ -259,7 +212,7 @@ class SamTwoWayAttentionBlock(nn.Module):
             attention_downsample_rate (*optionalk*, int, defaults to 2):
                 The downsample ratio of the block used to reduce the inner dim of the attention.
             skip_first_layer_pe (*optional*, bool, defaults to `False`):
-                Whether or not to skip the addition of the query_point_embedding on the first layer.
+                Whether or not to skip the addition of the query_embeds on the first layer.
         """
         super().__init__()
 
@@ -284,27 +237,27 @@ class SamTwoWayAttentionBlock(nn.Module):
         self,
         queries: Tensor,
         keys: Tensor,
-        query_point_embedding: Tensor,
-        key_point_embedding: Tensor,
+        query_embeds: Tensor,
+        key_embeds: Tensor,
         attention_similarity: Tensor,
         output_attentions: bool = False,
     ):
         # Self attention block
         if self.skip_first_layer_pe:
-            queries = self.self_attn(query=queries, key=queries, value=queries)
+            queries = self.self_attn(query=queries, key=queries, value=queries) #点进行自注意力
         else:
-            query = queries + query_point_embedding
+            query = queries + query_embeds
             attn_out = self.self_attn(query=query, key=query, value=queries)
             queries = queries + attn_out
         queries = self.layer_norm1(queries)
 
         # Cross attention block, tokens attending to image embedding
-        query = queries + query_point_embedding
-        key = keys + key_point_embedding
+        query = queries + query_embeds #torch.Size([1, 1, 7, 256])
+        key = keys + key_embeds #torch.Size([1, 1, 4096, 256])
 
         attn_out = self.cross_attn_token_to_image(
             query=query, key=key, value=keys, attention_similarity=attention_similarity
-        )
+        ) #点 图 图 ->点 torch.Size([1, 1, 7, 256])
         queries = queries + attn_out
 
         queries = self.layer_norm2(queries)
@@ -315,10 +268,10 @@ class SamTwoWayAttentionBlock(nn.Module):
         queries = self.layer_norm3(queries)
 
         # Cross attention block, image embedding attending to tokens
-        query = queries + query_point_embedding
-        key = keys + key_point_embedding
+        query = queries + query_embeds
+        key = keys + key_embeds
 
-        attn_out = self.cross_attn_image_to_token(query=key, key=query, value=queries)
+        attn_out = self.cross_attn_image_to_token(query=key, key=query, value=queries) #图 点 点 -> 图 torch.Size([1, 1, 4096, 256])
         keys = keys + attn_out
 
         keys = self.layer_norm4(keys)
@@ -347,45 +300,50 @@ class SamTwoWayTransformer(nn.Module):
         self.final_attn_token_to_image = SamAttention(config)
         self.layer_norm_final_attn = nn.LayerNorm(config.hidden_size)
 
+
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
     def forward(
         self,
-        point_embeddings: Tensor,
-        image_embeddings: Tensor,
-        image_positional_embeddings: Tensor,
-        attention_similarity: Tensor,
-        target_embedding=None,
-        output_attentions: Optional[bool] = None,
+        point_embeds: Tensor, #torch.Size([1, 1, 7, 256])
+        image_embeds: Tensor, #torch.Size([1, 256, 64, 64])
+        image_positional_embeds: Tensor, #torch.Size([1, 256, 64, 64])
+        attention_similarity: Tensor, #none
+        target_embeds=None, #none
+        output_attentions: Optional[bool] = None,  #false
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutput]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
 
         all_attentions = ()
 
-        if image_embeddings is None:
+        if image_embeds is None:
             raise ValueError("You have to specify an image_embedding")
 
-        image_embeddings = image_embeddings.flatten(2).permute(0, 2, 1).unsqueeze(1)
-        image_positional_embeddings = image_positional_embeddings.flatten(2).permute(0, 2, 1).unsqueeze(1)
+        image_embeds = image_embeds.flatten(2).permute(0, 2, 1).unsqueeze(1) #torch.Size([1, 1, 4096, 256]) 批 1 宽高 维
+        image_positional_embeds = image_positional_embeds.flatten(2).permute(0, 2, 1).unsqueeze(1) #torch.Size([1, 1, 4096, 256]) 批 1 宽高 维
 
         # Prepare queries
-        queries = point_embeddings
-        keys = image_embeddings
+        queries = point_embeds
+        keys = image_embeds
 
         # Apply transformer blocks and final layernorm
-        for layer in self.layers:
-            if target_embedding is not None:
-                queries += target_embedding
+        for layer_i in self.layers:
+            if target_embeds is not None:
+                queries += target_embeds
 
-            queries, keys, attention_outputs = layer(
+            queries, keys, attention_outputs = layer_i(
                 queries=queries,
                 keys=keys,
-                query_point_embedding=point_embeddings,
-                key_point_embedding=image_positional_embeddings,
+                query_embeds=point_embeds,
+                key_embeds=image_positional_embeds,
                 attention_similarity=attention_similarity,
                 output_attentions=output_attentions,
             )
@@ -394,11 +352,11 @@ class SamTwoWayTransformer(nn.Module):
                 all_attentions = all_attentions + (attention_outputs,)
 
         # Apply the final attenion layer from the points to the image
-        query = queries + point_embeddings
-        key = keys + image_positional_embeddings
+        query = queries + point_embeds #torch.Size([1, 1, 7, 256])
+        key = keys + image_positional_embeds #torch.Size([1, 1, 4096, 256])
 
         attn_out = self.final_attn_token_to_image(query=query, key=key, value=keys)
-
+        # 点 图 图 -> 点 torch.Size([1, 1, 7, 256])
         queries = queries + attn_out
         queries = self.layer_norm_final_attn(queries)
         return queries, keys, all_attentions
@@ -416,7 +374,7 @@ class SamFeedForward(nn.Module):
         self.layers = nn.ModuleList([nn.Linear(hidden_dim, hidden_dim) for _ in range(num_layers - 2)])
         self.sigmoid_output = sigmoid_output
 
-    def forward(self, hidden_states):
+    def forward(self, hidden_states): #torch.Size([1, 1, 256])
         hidden_states = self.proj_in(hidden_states)
         hidden_states = self.activation(hidden_states)
         for layer in self.layers:
@@ -459,82 +417,66 @@ class SamMaskDecoder(nn.Module):
 
     def forward(
         self,
-        image_embeddings: torch.Tensor,
-        image_positional_embeddings: torch.Tensor,
-        sparse_prompt_embeddings: torch.Tensor,
-        dense_prompt_embeddings: torch.Tensor,
+        image_embeds: torch.Tensor, #image_embeds torch.Size([1, 256, 64, 64])
+        image_positional_embeds: torch.Tensor, #torch.Size([1, 256, 64, 64])
+        sparse_prompt_embeds: torch.Tensor, #torch.Size([1, 1, 2, 256])
+        dense_prompt_embeds: torch.Tensor,
         multimask_output: bool,
         output_attentions: Optional[bool] = None,
         attention_similarity: torch.Tensor = None,
-        target_embedding: torch.Tensor = None,
+        target_embeds: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Predict masks given image and prompt embeddings.
 
-        Args:
-            image_embeddings (`torch.Tensor`):
-                the embeddings from the image encoder
-            image_positional_embedding (`torch.Tensor`):
-                positional encoding with the shape of image_embeddings
-            sparse_prompt_embeddings (`torch.Tensor`):
-                The embeddings of the points and boxes
-            dense_prompt_embeddings (`torch.Tensor`):
-                the embeddings of the mask inputs
-            multimask_output (bool):
-                Whether to return multiple masks or a single mask.
-            output_attentions (bool, *optional*):
-                Whether or not to return the attentions tensors of all attention layers.
-        """
-        batch_size, num_channels, height, width = image_embeddings.shape
-        point_batch_size = sparse_prompt_embeddings.shape[1]
+        batch_size, num_channels, height, width = image_embeds.shape
+        point_batch_size = sparse_prompt_embeds.shape[1]
         # Concatenate output tokens
-        output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
-        output_tokens = output_tokens.repeat(batch_size, point_batch_size, 1, 1)
+        output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0) #Embedding(1, 256) Embedding(4, 256) 
+        output_tokens = output_tokens.repeat(batch_size, point_batch_size, 1, 1) #torch.Size([1, 1, 5, 256])
 
-        if sparse_prompt_embeddings.sum().item() != 0:
-            tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=2)
+        if sparse_prompt_embeds.sum().item() != 0:
+            tokens = torch.cat((output_tokens, sparse_prompt_embeds), dim=2) #torch.Size([1, 1, 7, 256]) iou mask point
         else:
             tokens = output_tokens
-        point_embeddings = tokens.to(self.iou_token.weight.dtype)
+        point_embeds = tokens.to(self.iou_token.weight.dtype) #torch.Size([1, 1, 7, 256])
 
         # Expand per-image data in batch direction to be per-point
-        image_embeddings = image_embeddings + dense_prompt_embeddings
-        image_embeddings = image_embeddings.repeat_interleave(point_batch_size, 0)
-        image_positional_embeddings = image_positional_embeddings.repeat_interleave(point_batch_size, 0)
+        image_embeds = image_embeds + dense_prompt_embeds #torch.Size([1, 256, 64, 64])
+        image_embeds = image_embeds.repeat_interleave(point_batch_size, 0) #torch.Size([1, 256, 64, 64])
+        image_positional_embeds = image_positional_embeds.repeat_interleave(point_batch_size, 0) #torch.Size([1, 256, 64, 64])
 
         # Run the transformer, image_positional_embedding are consumed
-        point_embedding, image_embeddings, attentions = self.transformer(
-            point_embeddings=point_embeddings,
-            image_embeddings=image_embeddings,
-            image_positional_embeddings=image_positional_embeddings,
-            attention_similarity=attention_similarity,
-            target_embedding=target_embedding,
-            output_attentions=output_attentions,
+        point_embedding, image_embeds, attentions = self.transformer(
+            point_embeds=point_embeds, #torch.Size([1, 1, 7, 256])
+            image_embeds=image_embeds, #torch.Size([1, 256, 64, 64])
+            image_positional_embeds=image_positional_embeds, #torch.Size([1, 256, 64, 64])
+            attention_similarity=attention_similarity, #none
+            target_embeds=target_embeds, #none
+            output_attentions=output_attentions, #false
         )
-        iou_token_out = point_embedding[:, :, 0, :]
-        mask_tokens_out = point_embedding[:, :, 1 : (1 + self.num_mask_tokens), :]
+        iou_token_out = point_embedding[:, :, 0, :] #torch.Size([1, 1, 256])
+        mask_tokens_out = point_embedding[:, :, 1 : (1 + self.num_mask_tokens), :] #torch.Size([1, 1, 4, 256])
 
         # Upscale mask embeddings and predict masks using the mask tokens
-        image_embeddings = image_embeddings.transpose(2, 3).reshape(
+        image_embeds = image_embeds.transpose(2, 3).reshape(
             batch_size * point_batch_size, num_channels, height, width
-        )
+        ) #torch.Size([1, 256, 64, 64])
 
-        upscaled_embedding = self.upscale_conv1(image_embeddings)
-        upscaled_embedding = self.activation(self.upscale_layer_norm(upscaled_embedding))
-        upscaled_embedding = self.activation(self.upscale_conv2(upscaled_embedding))
+        upscaled_embeds = self.upscale_conv1(image_embeds) #torch.Size([1, 64, 128, 128])
+        upscaled_embeds = self.activation(self.upscale_layer_norm(upscaled_embeds))
+        upscaled_embeds = self.activation(self.upscale_conv2(upscaled_embeds))
 
         hyper_in_list = []
-        for i in range(self.num_mask_tokens):
+        for i in range(self.num_mask_tokens): #4
             current_mlp = self.output_hypernetworks_mlps[i]
             hyper_in_list += [current_mlp(mask_tokens_out[:, :, i, :])]
-        hyper_in = torch.stack(hyper_in_list, dim=2)
+        hyper_in = torch.stack(hyper_in_list, dim=2) #torch.Size([1, 1, 4, 32])
 
-        _, num_channels, height, width = upscaled_embedding.shape
-        upscaled_embedding = upscaled_embedding.reshape(batch_size, point_batch_size, num_channels, height * width)
-        masks = (hyper_in @ upscaled_embedding).reshape(batch_size, point_batch_size, -1, height, width)
+        _, num_channels, height, width = upscaled_embeds.shape #torch.Size([1, 32, 256, 256])
+        upscaled_embeds = upscaled_embeds.reshape(batch_size, point_batch_size, num_channels, height * width) #torch.Size([1, 1, 32, 65536])
+        masks = (hyper_in @ upscaled_embeds).reshape(batch_size, point_batch_size, -1, height, width) #torch.Size([1, 1, 4, 256, 256])
 
         # Generate mask quality predictions
-        iou_pred = self.iou_prediction_head(iou_token_out)
+        iou_pred = self.iou_prediction_head(iou_token_out) #torch.Size([1, 1, 4])
 
         # Select the correct mask or masks for output
         if multimask_output:
@@ -600,8 +542,8 @@ class SamMaskEmbedding(nn.Module):
         hidden_states = self.conv2(hidden_states)
         hidden_states = self.layer_norm2(hidden_states)
         hidden_states = self.activation(hidden_states)
-        dense_embeddings = self.conv3(hidden_states)
-        return dense_embeddings
+        dense_embeds = self.conv3(hidden_states)
+        return dense_embeds
 
 
 class SamPromptEncoder(nn.Module):
@@ -687,33 +629,33 @@ class SamPromptEncoder(nn.Module):
             masks (`torch.Tensor`, *optional*):
                 masks to embed
         """
-        sparse_embeddings = None
+        sparse_embeds = None
         batch_size = 1
         target_device = self.shared_embedding.positional_embedding.device
         if input_points is not None:
             batch_size, point_batch_size = input_points.shape[:2]
             if input_labels is None:
                 raise ValueError("If points are provided, labels must also be provided.")
-            point_embeddings = self._embed_points(input_points, input_labels, pad=(input_boxes is None))
-            sparse_embeddings = point_embeddings
+            point_embeds = self._embed_points(input_points, input_labels, pad=(input_boxes is None))
+            sparse_embeds = point_embeds
         if input_boxes is not None:
             batch_size = input_boxes.shape[0]
             box_embeddings = self._embed_boxes(input_boxes)
-            if sparse_embeddings is None:
-                sparse_embeddings = box_embeddings
+            if sparse_embeds is None:
+                sparse_embeds = box_embeddings
             else:
-                sparse_embeddings = torch.cat([sparse_embeddings, box_embeddings], dim=2)
+                sparse_embeds = torch.cat([sparse_embeds, box_embeddings], dim=2)
         if input_masks is not None:
-            dense_embeddings = self.mask_embed(input_masks)
+            dense_embeds = self.mask_embed(input_masks)
         else:
-            dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
+            dense_embeds = self.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 batch_size, -1, self.image_embedding_size[0], self.image_embedding_size[1]
             )
 
-        if sparse_embeddings is None:
-            sparse_embeddings = torch.zeros((batch_size, 1, 1, self.hidden_size), device=target_device)
+        if sparse_embeds is None:
+            sparse_embeds = torch.zeros((batch_size, 1, 1, self.hidden_size), device=target_device)
 
-        return sparse_embeddings, dense_embeddings
+        return sparse_embeds, dense_embeds
 
 
 class SamVisionAttention(nn.Module):
@@ -809,42 +751,42 @@ class SamVisionAttention(nn.Module):
         """
         query_height, query_width = q_size
         key_height, key_width = k_size
-        relative_position_height = self.get_rel_pos(query_height, key_height, rel_pos_h)
-        relative_position_width = self.get_rel_pos(query_width, key_width, rel_pos_w)
+        relative_position_height = self.get_rel_pos(query_height, key_height, rel_pos_h) #->torch.Size([14, 14, 64])
+        relative_position_width = self.get_rel_pos(query_width, key_width, rel_pos_w) #->torch.Size([14, 14, 64])
 
         batch_size, _, dim = query.shape
-        reshaped_query = query.reshape(batch_size, query_height, query_width, dim)
-        rel_h = torch.einsum("bhwc,hkc->bhwk", reshaped_query, relative_position_height)
-        rel_w = torch.einsum("bhwc,wkc->bhwk", reshaped_query, relative_position_width)
-        attn = attn.reshape(batch_size, query_height, query_width, key_height, key_width)
+        reshaped_query = query.reshape(batch_size, query_height, query_width, dim) #torch.Size([300, 14, 14, 64])
+        rel_h = torch.einsum("bhwc,hkc->bhwk", reshaped_query, relative_position_height) #torch.Size([300, 14, 14, 14])
+        rel_w = torch.einsum("bhwc,wkc->bhwk", reshaped_query, relative_position_width) #torch.Size([300, 14, 14, 14])
+        attn = attn.reshape(batch_size, query_height, query_width, key_height, key_width) #torch.Size([300, 14, 14, 14, 14])
         attn = attn + rel_h[:, :, :, :, None] + rel_w[:, :, :, None, :]
         attn = attn.reshape(batch_size, query_height * query_width, key_height * key_width)
-        return attn
+        return attn #相当于加入了坐标注意力
 
     def forward(self, hidden_states: torch.Tensor, output_attentions=False) -> torch.Tensor:
-        batch_size, height, width, _ = hidden_states.shape
-        # qkv with shape (3, batch_size, nHead, height * width, channel)
+        batch_size, height, width, _ = hidden_states.shape #torch.Size([25, 14, 14, 768])
+        # qkv with shape (3, window_batch_size, nHead, window_height * window_width, channel)
         qkv = (
             self.qkv(hidden_states)
             .reshape(batch_size, height * width, 3, self.num_attention_heads, -1)
             .permute(2, 0, 3, 1, 4)
         )
-        # q, k, v with shape (batch_size * nHead, height * width, channel)
-        query, key, value = qkv.reshape(3, batch_size * self.num_attention_heads, height * width, -1).unbind(0)
+        # q, k, v with shape (windows_batch_size * nHead, windows_height * windows_width, channel)
+        query, key, value = qkv.reshape(3, batch_size * self.num_attention_heads, height * width, -1).unbind(0) #torch.Size([300, 196, 64])
 
-        attn_weights = (query * self.scale) @ key.transpose(-2, -1)
+        attn_weights = (query * self.scale) @ key.transpose(-2, -1) #torch.Size([300, 196, 196])
 
         if self.use_rel_pos:
             attn_weights = self.add_decomposed_rel_pos(
                 attn_weights, query, self.rel_pos_h, self.rel_pos_w, (height, width), (height, width)
-            )
+            ) #torch.Size([300, 196, 196])
 
         attn_weights = torch.nn.functional.softmax(attn_weights, dtype=torch.float32, dim=-1).to(query.dtype)
 
         attn_probs = nn.functional.dropout(attn_weights, p=self.dropout, training=self.training)
 
-        attn_output = (attn_probs @ value).reshape(batch_size, self.num_attention_heads, height, width, -1)
-        attn_output = attn_output.permute(0, 2, 3, 1, 4).reshape(batch_size, height, width, -1)
+        attn_output = (attn_probs @ value).reshape(batch_size, self.num_attention_heads, height, width, -1) #torch.Size([25, 12, 14, 14, 64])
+        attn_output = attn_output.permute(0, 2, 3, 1, 4).reshape(batch_size, height, width, -1) #torch.Size([25, 14, 14, 768]) 批 宽 高 头维
 
         attn_output = self.proj(attn_output)
 
@@ -874,23 +816,23 @@ class SamVisionLayer(nn.Module):
 
         Returns:
             windows: windows after partition with [batch_size * num_windows, window_size, window_size, channel].
-            (pad_height, pad_width): padded height and width before partition
-        """
+            (padding_height, padding_width): padded height and width before partition
+        """ #直接理解为双窗口 传两条裤子
         batch_size, height, width, channel = hidden_states.shape
 
         pad_h = (window_size - height % window_size) % window_size
         pad_w = (window_size - width % window_size) % window_size
-        hidden_states = F.pad(hidden_states, (0, 0, 0, pad_w, 0, pad_h))
-        pad_height, pad_width = height + pad_h, width + pad_w
+        hidden_states = F.pad(hidden_states, (0, 0, 0, pad_w, 0, pad_h)) #torch.Size([1, 70, 70, 768])
+        padding_height, padding_width = height + pad_h, width + pad_w #70 70
 
         hidden_states = hidden_states.reshape(
-            batch_size, pad_height // window_size, window_size, pad_width // window_size, window_size, channel
-        )
-        windows = hidden_states.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(-1, window_size, window_size, channel)
-        return windows, (pad_height, pad_width)
-
+            batch_size, padding_height // window_size, window_size, padding_width // window_size, window_size, channel
+        ) #torch.Size([1, 5, 14, 5, 14, 768])
+        windows = hidden_states.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(-1, window_size, window_size, channel) #torch.Size([25, 14, 14, 768])
+        return windows, (padding_height, padding_width)
+# hidden_states, self.window_size, padding_shape, (height, width)) #torch.Size([25, 14, 14, 768]) #14
     def window_unpartition(
-        self, windows: torch.Tensor, window_size: int, padding_shape: Tuple[int, int], original_shape: Tuple[int, int]
+        self, hidden_states: torch.Tensor, window_size: int, padding_shape: Tuple[int, int], original_shape: Tuple[int, int]
     ) -> torch.Tensor:
         """
         Args:
@@ -900,25 +842,25 @@ class SamVisionLayer(nn.Module):
             window_size (int):
                 window size.
             padding_shape (Tuple):
-                padded height and width (pad_height, pad_width).
+                padded height and width (padding_height, padding_width).
             original_shape (Tuple): original height and width (height, width) before padding.
 
         Returns:
             hidden_states: unpartitioned sequences with [batch_size, height, width, channel].
         """
-        pad_height, pad_width = padding_shape
-        height, width = original_shape
-        batch_size = windows.shape[0] // (pad_height * pad_width // window_size // window_size)
-        hidden_states = windows.reshape(
-            batch_size, pad_height // window_size, pad_width // window_size, window_size, window_size, -1
+        padding_height, padding_width = padding_shape #70 70
+        original_height, original_width = original_shape #64 64
+        batch_size = hidden_states.shape[0] // (padding_height * padding_width // window_size // window_size) #1
+        hidden_states = hidden_states.reshape(
+            batch_size, padding_height // window_size, padding_width // window_size, window_size, window_size, -1
         )
         hidden_states = (
-            hidden_states.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(batch_size, pad_height, pad_width, -1)
-        )
+            hidden_states.permute(0, 1, 3, 2, 4, 5).contiguous().reshape(batch_size, padding_height, padding_width, -1)
+        ) #torch.Size([1, 70, 70, 768])
 
-        hidden_states = hidden_states[:, :height, :width, :].contiguous()
+        hidden_states = hidden_states[:, :original_height, :original_width, :].contiguous() #直接裁切
         return hidden_states
-
+    # patch window grid是一个概念
     def forward(
         self,
         hidden_states: torch.Tensor,
@@ -930,7 +872,7 @@ class SamVisionLayer(nn.Module):
         # Window partition
         if self.window_size > 0:
             height, width = hidden_states.shape[1], hidden_states.shape[2]
-            hidden_states, padding_shape = self.window_partition(hidden_states, self.window_size)
+            hidden_states, padding_shape = self.window_partition(hidden_states, self.window_size) #torch.Size([25, 14, 14, 768]) (70, 70)
 
         hidden_states, attn_weights = self.attn(
             hidden_states=hidden_states,
@@ -938,7 +880,7 @@ class SamVisionLayer(nn.Module):
         )
         # Reverse window partition
         if self.window_size > 0:
-            hidden_states = self.window_unpartition(hidden_states, self.window_size, padding_shape, (height, width))
+            hidden_states = self.window_unpartition(hidden_states, self.window_size, padding_shape, (height, width)) #torch.Size([25, 14, 14, 768]) #14
 
         hidden_states = residual + hidden_states
         layernorm_output = self.layer_norm2(hidden_states)
@@ -1006,6 +948,13 @@ class SamVisionEncoder(nn.Module):
     def get_input_embeddings(self):
         return self.patch_embed
 
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
     def forward(
         self,
         pixel_values: Optional[torch.FloatTensor] = None,
@@ -1013,56 +962,53 @@ class SamVisionEncoder(nn.Module):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, SamVisionEncoderOutput]:
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
 
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
-        hidden_states = self.patch_embed(pixel_values)
-        if self.pos_embed is not None:
+        hidden_states = self.patch_embed(pixel_values) #打成patch torch.Size([1, 64, 64, 768])
+        if self.pos_embed is not None: #加入位置编码
             hidden_states = hidden_states + self.pos_embed
 
         all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_attentions else None
+        all_attentions = () if output_attentions else None
 
-        for i, layer_module in enumerate(self.layers):
+        for idx, layer_i in enumerate(self.layers):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+                    layer_i.__call__,
                     hidden_states,
                 )
             else:
-                layer_outputs = layer_module(hidden_states, output_attentions=output_attentions)
+                layer_outputs = layer_i(hidden_states, output_attentions=output_attentions)
 
             hidden_states = layer_outputs[0]
 
             if output_attentions:
-                all_self_attentions = all_self_attentions + (layer_outputs[1],)
+                all_attentions = all_attentions + (layer_outputs[1],)
 
         if output_hidden_states:
             all_hidden_states = all_hidden_states + (hidden_states,)
 
-        hidden_states = self.neck(hidden_states)
+        hidden_states = self.neck(hidden_states) #torch.Size([1, 64, 64, 768])->torch.Size([1, 256, 64, 64]) 降低维度
 
         if not return_dict:
             outputs = (hidden_states,)
             if output_hidden_states:
                 outputs = outputs + (all_hidden_states,)
             if output_attentions:
-                outputs = outputs + (all_self_attentions,)
+                outputs = outputs + (all_attentions,)
             return outputs
 
         return SamVisionEncoderOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_attentions,
         )
 
 
@@ -1145,7 +1091,7 @@ SAM_INPUTS_DOCSTRING = r"""
             generate a corresponding embedding, that will be fed later on to the mask decoder. These masks needs to be
             manually fed by the user, and they need to be of shape (`batch_size`, `image_size`, `image_size`).
 
-        image_embeddings (`torch.FloatTensor` of shape `(batch_size, output_channels, window_size, window_size)`):
+        image_embeds (`torch.FloatTensor` of shape `(batch_size, output_channels, window_size, window_size)`):
             Image embeddings, this is used by the mask decder to generate masks and iou scores. For more memory
             efficient computation, users can first retrieve the image embeddings using the `get_image_embeddings`
             method, and then feed them to the `forward` method instead of feeding the `pixel_values`.
@@ -1156,7 +1102,7 @@ SAM_INPUTS_DOCSTRING = r"""
         attention_similarity (`torch.FloatTensor`, *optional*):
             Attention similarity tensor, to be provided to the mask decoder for target-guided attention in case the
             model is used for personalization as introduced in [PerSAM](https://arxiv.org/abs/2305.03048).
-        target_embedding (`torch.FloatTensor`, *optional*):
+        target_embeds (`torch.FloatTensor`, *optional*):
             Embedding of the target concept, to be provided to the mask decoder for target-semantic prompting in case
             the model is used for personalization as introduced in [PerSAM](https://arxiv.org/abs/2305.03048).
         output_attentions (`bool`, *optional*):
@@ -1195,13 +1141,13 @@ class SamModel(SamPreTrainedModel):
         size = self.config.prompt_encoder_config.image_embedding_size
         target_device = self.shared_image_embedding.positional_embedding.device
         target_dtype = self.shared_image_embedding.positional_embedding.dtype
-        grid = torch.ones((size, size), device=target_device, dtype=target_dtype)
+        grid = torch.ones((size, size), device=target_device, dtype=target_dtype) #torch.Size([64, 64])
         y_embed = grid.cumsum(dim=0) - 0.5
         x_embed = grid.cumsum(dim=1) - 0.5
-        y_embed = y_embed / size
+        y_embed = y_embed / size #归一化
         x_embed = x_embed / size
 
-        positional_embedding = self.shared_image_embedding(torch.stack([x_embed, y_embed], dim=-1))
+        positional_embedding = self.shared_image_embedding(torch.stack([x_embed, y_embed], dim=-1)) #torch.Size([64, 64, 2]) ->torch.Size([64, 64, 256])
         return positional_embedding.permute(2, 0, 1).unsqueeze(0)  # channel x height x width
 
     @torch.no_grad()
@@ -1232,8 +1178,8 @@ class SamModel(SamPreTrainedModel):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        image_embeddings = vision_output[0]
-        return image_embeddings
+        image_embeds = vision_output[0]
+        return image_embeds
 
     @torch.no_grad()
     def get_prompt_embeddings(
@@ -1268,6 +1214,49 @@ class SamModel(SamPreTrainedModel):
         )
         return prompt_output
 
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
+    def _validate_inputs(self,pixel_values=None, image_embeds=None, input_points=None, input_boxes=None):
+        # 两者都没有
+        if pixel_values is None and image_embeds is None:
+            raise ValueError("Either pixel_values or image_embeds must be provided.")
+        
+        # 两者都有
+        if pixel_values is not None and image_embeds is not None:
+            raise ValueError("Only one of pixel_values and image_embeds can be provided.")
+        
+        # 点异常
+        if input_points is not None:
+            if len(input_points.shape) != 4:
+                raise ValueError(
+                    "The input_points must be a 4D tensor. Of shape `batch_size`, `point_batch_size`, `nb_points_per_image`, `2`.",
+                    " got {}.".format(input_points.shape),
+                )
+        
+        # box异常
+        if input_boxes is not None:
+            if len(input_boxes.shape) != 3:
+                raise ValueError(
+                    "The input_boxes must be a 3D tensor. Of shape `batch_size`, `nb_boxes`, `4`.",
+                    " got {}.".format(input_boxes.shape),
+                )
+        
+        # 点和box的batchsize不统一
+        if input_points is not None and input_boxes is not None:
+            point_batch_size = input_points.shape[1]
+            box_batch_size = input_boxes.shape[1]
+            if point_batch_size != box_batch_size:
+                raise ValueError(
+                    "You should provide as many bounding boxes as input points per box. Got {} and {}.".format(
+                        point_batch_size, box_batch_size
+                    )
+                )
+            
     @add_start_docstrings_to_model_forward(SAM_INPUTS_DOCSTRING)
     def forward(
         self,
@@ -1276,10 +1265,10 @@ class SamModel(SamPreTrainedModel):
         input_labels: Optional[torch.LongTensor] = None,
         input_boxes: Optional[torch.FloatTensor] = None,
         input_masks: Optional[torch.LongTensor] = None,
-        image_embeddings: Optional[torch.FloatTensor] = None,
+        image_embeds: Optional[torch.FloatTensor] = None,
         multimask_output: bool = True,
         attention_similarity: Optional[torch.FloatTensor] = None,
-        target_embedding: Optional[torch.FloatTensor] = None,
+        target_embeds: Optional[torch.FloatTensor] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
@@ -1310,42 +1299,15 @@ class SamModel(SamPreTrainedModel):
         ... )
         ```
         """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
+        
+        self._validate_inputs(pixel_values=pixel_values, image_embeds=image_embeds, input_points=input_points, input_boxes=input_boxes)
 
-        if pixel_values is None and image_embeddings is None:
-            raise ValueError("Either pixel_values or image_embeddings must be provided.")
 
-        if pixel_values is not None and image_embeddings is not None:
-            raise ValueError("Only one of pixel_values and image_embeddings can be provided.")
-
-        if input_points is not None and len(input_points.shape) != 4:
-            raise ValueError(
-                "The input_points must be a 4D tensor. Of shape `batch_size`, `point_batch_size`, `nb_points_per_image`, `2`.",
-                " got {}.".format(input_points.shape),
-            )
-        if input_boxes is not None and len(input_boxes.shape) != 3:
-            raise ValueError(
-                "The input_points must be a 3D tensor. Of shape `batch_size`, `nb_boxes`, `4`.",
-                " got {}.".format(input_boxes.shape),
-            )
-        if input_points is not None and input_boxes is not None:
-            point_batch_size = input_points.shape[1]
-            box_batch_size = input_boxes.shape[1]
-            if point_batch_size != box_batch_size:
-                raise ValueError(
-                    "You should provide as many bounding boxes as input points per box. Got {} and {}.".format(
-                        point_batch_size, box_batch_size
-                    )
-                )
-
-        image_positional_embeddings = self.get_image_wide_positional_embeddings()
+        batch_size = pixel_values.shape[0] if pixel_values is not None else image_embeds.shape[0]
+        image_positional_embeds = self.get_image_wide_positional_embeddings() #torch.Size([1, 256, 64, 64])
         # repeat with batch size
-        batch_size = pixel_values.shape[0] if pixel_values is not None else image_embeddings.shape[0]
-        image_positional_embeddings = image_positional_embeddings.repeat(batch_size, 1, 1, 1)
+        image_positional_embeds = image_positional_embeds.repeat(batch_size, 1, 1, 1)#torch.Size([1, 256, 64, 64])
 
         vision_attentions = None
         vision_hidden_states = None
@@ -1357,7 +1319,7 @@ class SamModel(SamPreTrainedModel):
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
             )
-            image_embeddings = vision_outputs[0]
+            image_embeds = vision_outputs[0]
 
             if output_hidden_states:
                 vision_hidden_states = vision_outputs[1]
@@ -1367,35 +1329,35 @@ class SamModel(SamPreTrainedModel):
         if input_points is not None and input_labels is None:
             input_labels = torch.ones_like(input_points[:, :, :, 0], dtype=torch.int, device=input_points.device)
 
-        if input_points is not None and image_embeddings.shape[0] != input_points.shape[0]:
+        if input_points is not None and image_embeds.shape[0] != input_points.shape[0]:
             raise ValueError(
                 "The batch size of the image embeddings and the input points must be the same. ",
-                "Got {} and {} respectively.".format(image_embeddings.shape[0], input_points.shape[0]),
+                "Got {} and {} respectively.".format(image_embeds.shape[0], input_points.shape[0]),
                 " if you want to pass multiple points for the same image, make sure that you passed ",
                 " input_points of shape (batch_size, point_batch_size, num_points_per_image, 3) and ",
                 " input_labels of shape (batch_size, point_batch_size, num_points_per_image)",
             )
-
-        sparse_embeddings, dense_embeddings = self.prompt_encoder(
+        #torch.Size([1, 1, 2, 256])  torch.Size([1, 256, 64, 64])
+        sparse_embeds, dense_embeds = self.prompt_encoder(
             input_points=input_points,
             input_labels=input_labels,
             input_boxes=input_boxes,
             input_masks=input_masks,
         )
 
-        low_res_masks, iou_predictions, mask_decoder_attentions = self.mask_decoder(
-            image_embeddings=image_embeddings,
-            image_positional_embeddings=image_positional_embeddings,
-            sparse_prompt_embeddings=sparse_embeddings,
-            dense_prompt_embeddings=dense_embeddings,
-            multimask_output=multimask_output,
-            attention_similarity=attention_similarity,
-            target_embedding=target_embedding,
-            output_attentions=output_attentions,
+        pred_masks, iou_scores, mask_decoder_attentions = self.mask_decoder(
+            image_embeds=image_embeds, #图像嵌入
+            image_positional_embeds=image_positional_embeds, #图像位置嵌入
+            sparse_prompt_embeds=sparse_embeds, #稀疏编码
+            dense_prompt_embeds=dense_embeds, #密集编码
+            multimask_output=multimask_output, #true
+            attention_similarity=attention_similarity, #none
+            target_embeds=target_embeds,#none
+            output_attentions=output_attentions,#false
         )
 
         if not return_dict:
-            output = (iou_predictions, low_res_masks)
+            output = (iou_scores, pred_masks)
             if output_hidden_states:
                 output = output + (vision_hidden_states,)
 
@@ -1404,9 +1366,9 @@ class SamModel(SamPreTrainedModel):
             return output
 
         return SamImageSegmentationOutput(
-            iou_scores=iou_predictions,
-            pred_masks=low_res_masks,
-            vision_hidden_states=vision_hidden_states,
-            vision_attentions=vision_attentions,
-            mask_decoder_attentions=mask_decoder_attentions,
+            iou_scores=iou_scores, #torch.Size([1, 1, 3])
+            pred_masks=pred_masks, #torch.Size([1, 1, 3, 256, 256])
+            vision_hidden_states=vision_hidden_states, #none
+            vision_attentions=vision_attentions, #none
+            mask_decoder_attentions=mask_decoder_attentions, #none
         )

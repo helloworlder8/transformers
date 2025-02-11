@@ -324,7 +324,7 @@ def convert_align_checkpoint(checkpoint_path, pytorch_dump_folder_path, save_mod
     with torch.no_grad():
         outputs = hf_model(**inputs)
 
-    hf_image_features = outputs.image_embeds.detach().numpy()
+    hf_image_features = outputs.vision_embeds.detach().numpy()
     hf_text_features = outputs.text_embeds.detach().numpy()
 
     # Original model inference

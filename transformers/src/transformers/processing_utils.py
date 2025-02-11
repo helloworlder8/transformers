@@ -714,21 +714,7 @@ class ProcessorMixin(PushToHubMixin):
 
     @classmethod
     def from_args_and_dict(cls, args, processor_dict: Dict[str, Any], **kwargs):
-        """
-        Instantiates a type of [`~processing_utils.ProcessingMixin`] from a Python dictionary of parameters.
 
-        Args:
-            processor_dict (`Dict[str, Any]`):
-                Dictionary that will be used to instantiate the processor object. Such a dictionary can be
-                retrieved from a pretrained checkpoint by leveraging the
-                [`~processing_utils.ProcessingMixin.to_dict`] method.
-            kwargs (`Dict[str, Any]`):
-                Additional parameters from which to initialize the processor object.
-
-        Returns:
-            [`~processing_utils.ProcessingMixin`]: The processor object instantiated from those
-            parameters.
-        """
         processor_dict = processor_dict.copy()
         return_unused_kwargs = kwargs.pop("return_unused_kwargs", False)
         chat_template = kwargs.pop("chat_template", None)
@@ -949,10 +935,10 @@ class ProcessorMixin(PushToHubMixin):
                 [`~feature_extraction_utils.FeatureExtractionMixin.from_pretrained`] and
                 [`~tokenization_utils_base.PreTrainedTokenizer.from_pretrained`].
         """
-        kwargs["cache_dir"] = cache_dir
-        kwargs["force_download"] = force_download
-        kwargs["local_files_only"] = local_files_only
-        kwargs["revision"] = revision
+        kwargs["cache_dir"] = cache_dir #none
+        kwargs["force_download"] = force_download #false
+        kwargs["local_files_only"] = local_files_only #false
+        kwargs["revision"] = revision #'main'
 
         if token is not None:
             kwargs["token"] = token
@@ -1003,7 +989,7 @@ class ProcessorMixin(PushToHubMixin):
             else:
                 attribute_class = getattr(transformers_module, class_name) #'WhisperFeatureExtractor' 全局搜索类所在的空间
 
-            args.append(attribute_class.from_pretrained(model_name_or_path, **kwargs))
+            args.append(attribute_class.from_pretrained(model_name_or_path, **kwargs)) #回调函数
         return args
 
     @property

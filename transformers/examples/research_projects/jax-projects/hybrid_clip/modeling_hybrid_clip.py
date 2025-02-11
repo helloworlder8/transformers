@@ -95,29 +95,29 @@ class FlaxHybridCLIPModule(nn.Module):
             return_dict=return_dict,
         )
 
-        image_embeds = vision_outputs[1]
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / jnp.linalg.norm(image_embeds, axis=-1, keepdims=True)
+        vision_embeds = vision_embeds / jnp.linalg.norm(vision_embeds, axis=-1, keepdims=True)
         text_embeds = text_embeds / jnp.linalg.norm(text_embeds, axis=-1, keepdims=True)
 
         # cosine similarity as logits
         logit_scale = jnp.exp(self.logit_scale)
-        logits_per_text = jnp.matmul(text_embeds, image_embeds.T) * logit_scale
+        logits_per_text = jnp.matmul(text_embeds, vision_embeds.T) * logit_scale
         logits_per_image = logits_per_text.T
 
         if not return_dict:
-            return (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            return (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
 
         return FlaxCLIPOutput(
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

@@ -1185,8 +1185,8 @@ class VitsEncoder(nn.Module):
 
         return BaseModelOutput(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
         )
 
 
@@ -1241,8 +1241,8 @@ class VitsTextEncoder(nn.Module):
             last_hidden_state=last_hidden_state,
             prior_means=prior_means,
             prior_log_variances=prior_log_variances,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 

@@ -91,14 +91,14 @@ class TFCLIPOutput(ModelOutput):
         loss (`tf.Tensor` of shape `(1,)`, *optional*, returned when `return_loss` is `True`):
             Contrastive loss for image-text similarity.
         logits_per_image:(`tf.Tensor` of shape `(image_batch_size, text_batch_size)`):
-            The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
+            The scaled dot product scores between `vision_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
         logits_per_text:(`tf.Tensor` of shape `(text_batch_size, image_batch_size)`):
-            The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
+            The scaled dot product scores between `text_embeds` and `vision_embeds`. This represents the text-image
             similarity scores.
         text_embeds(`tf.Tensor` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of [`TFCLIPTextModel`].
-        image_embeds(`tf.Tensor` of shape `(batch_size, output_dim`):
+        vision_embeds(`tf.Tensor` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of
             [`TFCLIPVisionModel`].
         text_model_output([`~modeling_tf_utils.TFBaseModelOutputWithPooling`]):
@@ -111,7 +111,7 @@ class TFCLIPOutput(ModelOutput):
     logits_per_image: tf.Tensor = None
     logits_per_text: tf.Tensor = None
     text_embeds: tf.Tensor = None
-    image_embeds: tf.Tensor = None
+    vision_embeds: tf.Tensor = None
     text_model_output: TFBaseModelOutputWithPooling = None
     vision_model_output: TFBaseModelOutputWithPooling = None
 
@@ -618,8 +618,8 @@ class TFCLIPTextTransformer(keras.layers.Layer):
         return TFBaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def _build_causal_attention_mask(self, batch_size, seq_length, dtype=tf.float32):
@@ -752,8 +752,8 @@ class TFCLIPVisionTransformer(keras.layers.Layer):
         return TFBaseModelOutputWithPooling(
             last_hidden_state=sequence_output,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
     def build(self, input_shape=None):
@@ -986,19 +986,19 @@ class TFCLIPMainLayer(keras.layers.Layer):
             training=training,
         )
 
-        image_embeds = vision_outputs[1]
-        image_embeds = self.visual_projection(inputs=image_embeds)
+        vision_embeds = vision_outputs[1]
+        vision_embeds = self.visual_projection(inputs=vision_embeds)
 
         text_embeds = text_outputs[1]
         text_embeds = self.text_projection(inputs=text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / tf.norm(tensor=image_embeds, ord="euclidean", axis=-1, keepdims=True)
+        vision_embeds = vision_embeds / tf.norm(tensor=vision_embeds, ord="euclidean", axis=-1, keepdims=True)
         text_embeds = text_embeds / tf.norm(tensor=text_embeds, ord="euclidean", axis=-1, keepdims=True)
 
         # cosine similarity as logits
         logit_scale = tf.math.exp(self.logit_scale)
-        logits_per_text = tf.matmul(text_embeds, image_embeds, transpose_b=True) * logit_scale
+        logits_per_text = tf.matmul(text_embeds, vision_embeds, transpose_b=True) * logit_scale
         logits_per_image = tf.transpose(logits_per_text)
 
         loss = None
@@ -1007,7 +1007,7 @@ class TFCLIPMainLayer(keras.layers.Layer):
             loss = tf.reshape(loss, (1,))
 
         if not return_dict:
-            output = (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            output = (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
             return (loss,) + output if loss is not None else output
 
         return TFCLIPOutput(
@@ -1015,7 +1015,7 @@ class TFCLIPMainLayer(keras.layers.Layer):
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

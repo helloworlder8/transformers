@@ -655,8 +655,8 @@ class ConvBertEncoder(nn.Module):
             )
         return BaseModelOutputWithCrossAttentions(
             last_hidden_state=hidden_states,
-            hidden_states=all_hidden_states,
-            attentions=all_self_attentions,
+            all_hidden_states=all_hidden_states,
+            all_attentions=all_self_attentions,
             cross_attentions=all_cross_attentions,
         )
 

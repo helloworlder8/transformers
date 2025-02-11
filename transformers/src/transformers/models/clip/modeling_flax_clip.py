@@ -191,15 +191,15 @@ class FlaxCLIPOutput(ModelOutput):
     """
     Args:
         logits_per_image:(`jnp.ndarray` of shape `(image_batch_size, text_batch_size)`):
-            The scaled dot product scores between `image_embeds` and `text_embeds`. This represents the image-text
+            The scaled dot product scores between `vision_embeds` and `text_embeds`. This represents the image-text
             similarity scores.
         logits_per_text:(`jnp.ndarray` of shape `(text_batch_size, image_batch_size)`):
-            The scaled dot product scores between `text_embeds` and `image_embeds`. This represents the text-image
+            The scaled dot product scores between `text_embeds` and `vision_embeds`. This represents the text-image
             similarity scores.
         text_embeds(`jnp.ndarray` of shape `(batch_size, output_dim`):
             The text embeddings obtained by applying the projection layer to the pooled output of
             [`FlaxCLIPTextModel`].
-        image_embeds(`jnp.ndarray` of shape `(batch_size, output_dim`):
+        vision_embeds(`jnp.ndarray` of shape `(batch_size, output_dim`):
             The image embeddings obtained by applying the projection layer to the pooled output of
             [`FlaxCLIPVisionModel`].
         text_model_output(`FlaxBaseModelOutputWithPooling`):
@@ -211,7 +211,7 @@ class FlaxCLIPOutput(ModelOutput):
     logits_per_image: jnp.ndarray = None
     logits_per_text: jnp.ndarray = None
     text_embeds: jnp.ndarray = None
-    image_embeds: jnp.ndarray = None
+    vision_embeds: jnp.ndarray = None
     text_model_output: FlaxBaseModelOutputWithPooling = None
     vision_model_output: FlaxBaseModelOutputWithPooling = None
 
@@ -570,8 +570,8 @@ class FlaxCLIPTextTransformer(nn.Module):
         return FlaxBaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -620,8 +620,8 @@ class FlaxCLIPVisionTransformer(nn.Module):
         return FlaxBaseModelOutputWithPooling(
             last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
-            hidden_states=encoder_outputs.hidden_states,
-            attentions=encoder_outputs.attentions,
+            all_hidden_states=encoder_outputs.all_hidden_states,
+            all_attentions=encoder_outputs.all_attentions,
         )
 
 
@@ -1231,29 +1231,29 @@ class FlaxCLIPModule(nn.Module):
             return_dict=return_dict,
         )
 
-        image_embeds = vision_outputs[1]
-        image_embeds = self.visual_projection(image_embeds)
+        vision_embeds = vision_outputs[1]
+        vision_embeds = self.visual_projection(vision_embeds)
 
         text_embeds = text_outputs[1]
         text_embeds = self.text_projection(text_embeds)
 
         # normalized features
-        image_embeds = image_embeds / jnp.linalg.norm(image_embeds, axis=-1, keepdims=True)
+        vision_embeds = vision_embeds / jnp.linalg.norm(vision_embeds, axis=-1, keepdims=True)
         text_embeds = text_embeds / jnp.linalg.norm(text_embeds, axis=-1, keepdims=True)
 
         # cosine similarity as logits
         logit_scale = jnp.exp(self.logit_scale)
-        logits_per_text = jnp.matmul(text_embeds, image_embeds.T) * logit_scale
+        logits_per_text = jnp.matmul(text_embeds, vision_embeds.T) * logit_scale
         logits_per_image = logits_per_text.T
 
         if not return_dict:
-            return (logits_per_image, logits_per_text, text_embeds, image_embeds, text_outputs, vision_outputs)
+            return (logits_per_image, logits_per_text, text_embeds, vision_embeds, text_outputs, vision_outputs)
 
         return FlaxCLIPOutput(
             logits_per_image=logits_per_image,
             logits_per_text=logits_per_text,
             text_embeds=text_embeds,
-            image_embeds=image_embeds,
+            vision_embeds=vision_embeds,
             text_model_output=text_outputs,
             vision_model_output=vision_outputs,
         )

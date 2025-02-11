@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial, wraps
 from threading import Thread
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type, TypeVar, Union
 from zipfile import is_zipfile
 
 import torch
@@ -96,7 +96,7 @@ from .utils import (
     replace_return_docstrings,
     strtobool,
 )
-from .utils.hub import create_and_tag_model_card, download_checkpoint_shard_files
+from .utils.hub import create_and_tag_model_card, get_checkpoint_shard_files
 from .utils.import_utils import (
     ENV_VARS_TRUE_VALUES,
     is_sagemaker_mp_enabled,
@@ -169,6 +169,8 @@ else:
 if is_peft_available():
     from .utils import find_adapter_config_file
 
+SpecificPreTrainedModelType = TypeVar("SpecificPreTrainedModelType", bound="PreTrainedModel")
+
 TORCH_INIT_FUNCTIONS = {
     "uniform_": nn.init.uniform_,
     "normal_": nn.init.normal_,
@@ -225,6 +227,36 @@ def set_quantized_state():
     finally:
         _is_quantized = False
 
+
+# Skip recursive calls to deepspeed.zero.Init to avoid pinning errors.
+# This issue occurs with ZeRO stage 3 when using NVMe offloading.
+# For more details, refer to issue #34429.
+@contextmanager
+def set_zero3_state():
+    global _is_ds_init_called
+    _is_ds_init_called = True
+    try:
+        yield
+    finally:
+        _is_ds_init_called = False
+        
+def restore_default_torch_dtype(func):
+    """
+    Decorator to restore the default torch dtype
+    at the end of the function. Serves
+    as a backup in case calling the function raises
+    an error after the function has changed the default dtype but before it could restore it.
+    """
+
+    @wraps(func)
+    def _wrapper(*args, **kwargs):
+        old_dtype = torch.get_default_dtype()
+        try:
+            return func(*args, **kwargs)
+        finally:
+            torch.set_default_dtype(old_dtype)
+
+    return _wrapper
 
 def get_parameter_device(parameter: Union[nn.Module, "ModuleUtilsMixin"]):
     try:
@@ -1436,6 +1468,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 self.model_tags.append(tag)
 
     @classmethod
+    @restore_default_torch_dtype
     def _from_config(cls, config, **kwargs):
         """
         All context managers that the model should be initialized under go here.
@@ -3342,7 +3375,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 elif from_flax:
                     filename = FLAX_WEIGHTS_NAME
                 elif use_safetensors is not False:
-                    filename = _add_variant(SAFE_WEIGHTS_NAME, variant) #预训练的模型权重
+                    filename = _add_variant(SAFE_WEIGHTS_NAME, variant)
                 else:
                     filename = _add_variant(WEIGHTS_NAME, variant)
 
@@ -3433,7 +3466,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                                         target=auto_conversion,
                                         args=(model_name_or_path,),
                                         kwargs={"ignore_errors_during_conversion": True, **cached_file_kwargs},
-                                        name="Thread-autoconversion",
+                                        name="Thread-auto_conversion",
                                     ).start()
                         else:
                             # Otherwise, no PyTorch file was found, maybe there is a TF or Flax model file.
@@ -3491,8 +3524,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 resolved_archive_file = archive_file
             else:
                 logger.info(f"loading weights file {filename} from cache at {resolved_archive_file}")
-
-
         elif gguf_file:
             from .modeling_gguf_pytorch_utils import load_gguf_checkpoint
 
@@ -3519,13 +3550,16 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
                 gguf_path = cached_file(model_name_or_path, gguf_file, **cached_file_kwargs)
 
-            state_dict = load_gguf_checkpoint(gguf_path, return_tensors=True)["tensors"]
+            # we need a dummy model to help rename state_dict
+            with torch.device("meta"):
+                dummy_model = cls(config)
+            state_dict = load_gguf_checkpoint(gguf_path, return_tensors=True, model_to_load=dummy_model)["tensors"]
 
             resolved_archive_file = None
             is_sharded = False
         else:
             resolved_archive_file = None
-            
+
         return resolved_archive_file, is_sharded
 
     @staticmethod
@@ -3533,20 +3567,20 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         model_name_or_path,
         commit_hash,
         config=None,
-        force_download=False,
-        revision=None,
-        resume_download=False,
-        cache_dir=None,
         
+        cache_dir=None,
+        force_download=False,
+        resume_download=False,
         proxies=None,
         local_files_only=False,
         token=None,
+        revision=None,
         subfolder="",
     ):
         if commit_hash is None:
             if not isinstance(config, PretrainedConfig):
                 # We make a call to the config file first (which may be absent) to get the commit hash as soon as possible
-                resolved_config_file = cached_file( #获取模型的配置文件
+                resolved_config_file = cached_file(
                     model_name_or_path,
                     CONFIG_NAME,
                     cache_dir=cache_dir,
@@ -3557,11 +3591,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                     token=token,
                     revision=revision,
                     subfolder=subfolder,
+                    
                     _raise_exceptions_for_gated_repo=False,
                     _raise_exceptions_for_missing_entries=False,
                     _raise_exceptions_for_connection_errors=False,
                 )
-                commit_hash = extract_commit_hash(resolved_config_file, commit_hash) #获取哈希值
+                commit_hash = extract_commit_hash(resolved_config_file, commit_hash)
             else:
                 commit_hash = getattr(config, "_commit_hash", None)
 
@@ -3595,7 +3630,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         # Load config if we don't provide a configuration
         if not isinstance(config, PretrainedConfig):
             config_path = config if config is not None else model_name_or_path
-            config, model_kwargs = cls.config_class.from_pretrained( #生成配置类
+            config, model_kwargs = cls.config_class.from_pretrained(
                 config_path,
                 cache_dir=cache_dir,
                 return_unused_kwargs=True,
@@ -3611,13 +3646,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 **kwargs,
             )
         else:
-            # In case one passes a config to `from_pretrained` + "attn_implementation"
-            # override the `_attn_implementation` attribute to `attn_implementation` of the kwargs
-            # Please see: https://github.com/huggingface/transformers/issues/28038
-
-            # Overwrite `config._attn_implementation` by the one from the kwargs --> in auto-factory
-            # we pop attn_implementation from the kwargs but this handles the case where users
-            # passes manually the config to `from_pretrained`.
             config = copy.deepcopy(config)
 
             kwarg_attn_imp = kwargs.pop("attn_implementation", None)
@@ -3626,15 +3654,22 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
             model_kwargs = kwargs
 
-        pre_quantized = getattr(config, "quantization_config", None) is not None #false
-        if pre_quantized or quantization_config is not None: #两种方式配置中取出量化和手动传入
+        pre_quantized = hasattr(config, "quantization_config")
+        if pre_quantized and not AutoHfQuantizer.supports_quant_method(config.quantization_config):
+            pre_quantized = False
+
+        if pre_quantized or quantization_config is not None:
             if pre_quantized:
                 config.quantization_config = AutoHfQuantizer.merge_quantization_configs(
                     config.quantization_config, quantization_config
                 )
             else:
                 config.quantization_config = quantization_config
-            hf_quantizer = AutoHfQuantizer.from_config(config.quantization_config, pre_quantized=pre_quantized)
+
+            hf_quantizer = AutoHfQuantizer.from_config(
+                config.quantization_config,
+                pre_quantized=pre_quantized,
+            )
         else:
             hf_quantizer = None
 
@@ -3657,7 +3692,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 low_cpu_mem_usage = True
                 logger.warning("`low_cpu_mem_usage` was None, now default to True since model is quantized.")
         is_quantized = hf_quantizer is not None
-        config.name_or_path = model_name_or_path
         # 返回结果
         return config, hf_quantizer, is_quantized,torch_dtype,device_map, low_cpu_mem_usage, model_kwargs
 
@@ -3700,11 +3734,39 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                         )
                 elif hasattr(torch, torch_dtype):
                     torch_dtype = getattr(torch, torch_dtype)
-                else:
-                    raise ValueError(
-                        f'`torch_dtype` can be one of: `torch.dtype`, `"auto"` or a string of a valid `torch.dtype`, but received {torch_dtype}'
-                    )
+                    for sub_config_key in config.sub_configs.keys():
+                        sub_config = getattr(config, sub_config_key)
+                        sub_config.torch_dtype = torch_dtype
+            elif isinstance(torch_dtype, torch.dtype):
+                for sub_config_key in config.sub_configs.keys():
+                    sub_config = getattr(config, sub_config_key)
+                    sub_config.torch_dtype = torch_dtype
+            elif isinstance(torch_dtype, dict):
+                for key, curr_dtype in torch_dtype.items():
+                    if hasattr(config, key):
+                        value = getattr(config, key)
+                        value.torch_dtype = curr_dtype
+                # main torch dtype for modules that aren't part of any sub-config
+                torch_dtype = torch_dtype.get("")
+                config.torch_dtype = torch_dtype
+                if isinstance(torch_dtype, str) and hasattr(torch, torch_dtype):
+                    torch_dtype = getattr(torch, torch_dtype)
+                elif torch_dtype is None:
+                    torch_dtype = torch.float32
+            else:
+                raise ValueError(
+                    f"`torch_dtype` can be one of: `torch.dtype`, `'auto'`, a string of a valid `torch.dtype` or a `dict` with valid `torch_dtype` "
+                    f"for each sub-config in composite configs, but received {torch_dtype}"
+                )
+
             dtype_orig = cls._set_default_torch_dtype(torch_dtype)
+        else:
+            # set fp32 as the default dtype for BC
+            default_dtype = str(torch.get_default_dtype()).split(".")[-1]
+            config.torch_dtype = default_dtype
+            for key in config.sub_configs.keys():
+                value = getattr(config, key)
+                value.torch_dtype = default_dtype
 
         # Check if `_keep_in_fp32_modules` is not None
         use_keep_in_fp32_modules = (cls._keep_in_fp32_modules is not None) and (
@@ -3726,40 +3788,33 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             state_dict = None
 
 
-        return dtype_orig, state_dict, loaded_state_dict_keys,torch_dtype
+        return config, dtype_orig, state_dict, loaded_state_dict_keys, torch_dtype, use_keep_in_fp32_modules
 
     @staticmethod
-    def _instantiate_model(_fast_init,is_quantized,low_cpu_mem_usage, tp_plan):
+    def _instantiate_model(_fast_init,is_quantized,low_cpu_mem_usage):
+        # Instantiate model.
         # Instantiate model.
         init_contexts = [no_init_weights(_enable=_fast_init)]
-        tp_device = None
 
-        if is_deepspeed_zero3_enabled() and not is_quantized:
+        if is_deepspeed_zero3_enabled() and not is_quantized and not _is_ds_init_called:
             import deepspeed
 
             logger.info("Detected DeepSpeed ZeRO-3: activating zero.init() for this model")
-            init_contexts = [deepspeed.zero.Init(config_dict_or_path=deepspeed_config())] + init_contexts
+            init_contexts = [
+                deepspeed.zero.Init(config_dict_or_path=deepspeed_config()),
+                set_zero3_state(),
+            ] + init_contexts
         elif low_cpu_mem_usage:
             if not is_accelerate_available():
                 raise ImportError(
                     f"Using `low_cpu_mem_usage=True` or a `device_map` requires Accelerate: `pip install 'accelerate>={ACCELERATE_MIN_VERSION}'`"
                 )
             init_contexts.append(init_empty_weights())
-        elif tp_plan is not None:
-            if not torch.distributed.is_initialized():
-                raise ValueError("Tensor Parallel requires torch.distributed to be initialized first.")
-
-            # Detect the accelerator on the machine. If no accelerator is available, it returns CPU.
-            device_type = torch._C._get_accelerator().type
-            device_module = torch.get_device_module(device_type)
-            # Get device with index assuming equal number of devices per host
-            tp_device = torch.device(device_type, torch.distributed.get_rank() % device_module.device_count())
-            init_contexts.append(tp_device)
 
         if is_deepspeed_zero3_enabled() and is_quantized:
             init_contexts.append(set_quantized_state())
             
-        return  init_contexts, tp_device
+        return  init_contexts
 
 
     @staticmethod
@@ -3854,7 +3909,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             tied_params = find_tied_parameters(model)
             # check if we don't have tied param in different devices
             check_tied_parameters_on_same_device(tied_params, device_map)
+            
+            
         return device_map, low_cpu_mem_usage, keep_in_fp32_modules
+    
+    
+    
     
     @staticmethod
     def _dispatch_model(
@@ -3888,9 +3948,10 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             device_map_kwargs["offload_buffers"] = True
         return device_map_kwargs
     
-    @classmethod
+    @classmethod 
+    @restore_default_torch_dtype
     def from_pretrained(
-        cls,
+        cls: Type[SpecificPreTrainedModelType],
         model_name_or_path: Optional[Union[str, os.PathLike]],
         *model_args,
         config: Optional[Union[PretrainedConfig, str, os.PathLike]] = None,
@@ -3903,58 +3964,88 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         use_safetensors: bool = None,
         weights_only: bool = True,
         **kwargs,
-    ) -> "PreTrainedModel":
+    ) -> SpecificPreTrainedModelType:
 
         """ 参数处理 """
-        if True:
-            state_dict = kwargs.pop("state_dict", None)
-            from_tf = kwargs.pop("from_tf", False)
-            from_flax = kwargs.pop("from_flax", False)
-            resume_download = kwargs.pop("resume_download", None)
-            proxies = kwargs.pop("proxies", None)
-            output_loading_info = kwargs.pop("output_loading_info", False)
-            trust_remote_code = kwargs.pop("trust_remote_code", None)
-            _ = kwargs.pop("mirror", None)
-            from_pipeline = kwargs.pop("_from_pipeline", None)
-            from_auto_class = kwargs.pop("_from_auto", False)
-            _fast_init = kwargs.pop("_fast_init", True)
-            torch_dtype = kwargs.pop("torch_dtype", None)
-            low_cpu_mem_usage = kwargs.pop("low_cpu_mem_usage", None)
-            device_map = kwargs.pop("device_map", None)
-            max_memory = kwargs.pop("max_memory", None)
-            offload_folder = kwargs.pop("offload_folder", None)
-            offload_state_dict = kwargs.pop("offload_state_dict", False)
-            offload_buffers = kwargs.pop("offload_buffers", False)
-            load_in_8bit = kwargs.pop("load_in_8bit", False)
-            load_in_4bit = kwargs.pop("load_in_4bit", False)
-            quantization_config = kwargs.pop("quantization_config", None)
-            subfolder = kwargs.pop("subfolder", "")
-            commit_hash = kwargs.pop("_commit_hash", None)
-            variant = kwargs.pop("variant", None)
-            adapter_kwargs = kwargs.pop("adapter_kwargs", {})
-            adapter_name = kwargs.pop("adapter_name", "default")
-            use_flash_attention_2 = kwargs.pop("use_flash_attention_2", False)
-            generation_config = kwargs.pop("generation_config", None)
-            gguf_file = kwargs.pop("gguf_file", None)
-            gguf_path = None
-            tp_plan = kwargs.pop("tp_plan", None)
-            if tp_plan is not None and tp_plan != "auto":
-                raise ValueError(f"tp_plan supports 'auto' only for now but got {tp_plan}.")
-            if is_fsdp_enabled():
-                low_cpu_mem_usage = True
-            if token is not None and adapter_kwargs is not None and "token" not in adapter_kwargs:
-                adapter_kwargs["token"] = token
-            if use_safetensors is None and not is_safetensors_available():
-                use_safetensors = False
-            if trust_remote_code is True:
-                logger.warning(
-                    "The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is"
-                    " ignored."
-                )
-            if gguf_file is not None and not is_accelerate_available():
-                raise ValueError("accelerate is required when loading a GGUF file `pip install accelerate`.")
+        state_dict = kwargs.pop("state_dict", None)
+        from_tf = kwargs.pop("from_tf", False)
+        from_flax = kwargs.pop("from_flax", False)
+        resume_download = kwargs.pop("resume_download", None)
+        proxies = kwargs.pop("proxies", None)
+        output_loading_info = kwargs.pop("output_loading_info", False)
+        use_auth_token = kwargs.pop("use_auth_token", None)
+        trust_remote_code = kwargs.pop("trust_remote_code", None)
+        _ = kwargs.pop("mirror", None)
+        from_pipeline = kwargs.pop("_from_pipeline", None)
+        from_auto_class = kwargs.pop("_from_auto", False)
+        _fast_init = kwargs.pop("_fast_init", True)
+        torch_dtype = kwargs.pop("torch_dtype", None)
+        low_cpu_mem_usage = kwargs.pop("low_cpu_mem_usage", None)
+        device_map = kwargs.pop("device_map", None)
+        max_memory = kwargs.pop("max_memory", None)
+        offload_folder = kwargs.pop("offload_folder", None)
+        offload_state_dict = kwargs.pop("offload_state_dict", False)
+        offload_buffers = kwargs.pop("offload_buffers", False)
+        load_in_8bit = kwargs.pop("load_in_8bit", False)
+        load_in_4bit = kwargs.pop("load_in_4bit", False)
+        quantization_config = kwargs.pop("quantization_config", None)
+        subfolder = kwargs.pop("subfolder", "")
+        commit_hash = kwargs.pop("_commit_hash", None)
+        variant = kwargs.pop("variant", None)
+        adapter_kwargs = kwargs.pop("adapter_kwargs", {})
+        adapter_name = kwargs.pop("adapter_name", "default")
+        use_flash_attention_2 = kwargs.pop("use_flash_attention_2", False)
+        generation_config = kwargs.pop("generation_config", None)
+        gguf_file = kwargs.pop("gguf_file", None)
+        gguf_path = None
+        tp_plan = kwargs.pop("tp_plan", None)
+        if tp_plan is not None and tp_plan != "auto":
+            raise ValueError(f"tp_plan supports 'auto' only for now but got {tp_plan}.")
 
-        user_agent = {"file_type": "model", "framework": "pytorch", "from_auto_class": from_auto_class} #false
+        if tp_plan is not None and device_map is not None:
+            raise ValueError(
+                "`tp_plan` and `device_map` are mutually exclusive. Choose either one for parallelization."
+            )
+        tp_device = None
+        if tp_plan is not None:
+            if not torch.distributed.is_initialized():
+                raise ValueError("Tensor Parallel requires torch.distributed to be initialized first.")
+
+            # Detect the accelerator on the machine. If no accelerator is available, it returns CPU.
+            device_type = torch._C._get_accelerator().type
+            device_module = torch.get_device_module(device_type)
+            # Get device with index assuming equal number of devices per host
+            tp_device = torch.device(device_type, torch.distributed.get_rank() % device_module.device_count())
+            # This is the easiest way to dispatch to the current process device
+            device_map = tp_device
+
+        if is_fsdp_enabled():
+            low_cpu_mem_usage = True
+
+        if use_auth_token is not None:
+            warnings.warn(
+                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
+                FutureWarning,
+            )
+            if token is not None:
+                raise ValueError(
+                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
+                )
+            token = use_auth_token
+
+        if token is not None and adapter_kwargs is not None and "token" not in adapter_kwargs:
+            adapter_kwargs["token"] = token
+
+        if use_safetensors is None and not is_safetensors_available():
+            use_safetensors = False
+        if trust_remote_code is True:
+            logger.warning(
+                "The argument `trust_remote_code` is to be used with Auto classes. It has no effect here and is"
+                " ignored."
+            )
+        if gguf_file is not None and not is_accelerate_available():
+            raise ValueError("accelerate is required when loading a GGUF file `pip install accelerate`.")
+        user_agent = {"file_type": "model", "framework": "pytorch", "from_auto_class": from_auto_class}
         if from_pipeline is not None:
             user_agent["using_pipeline"] = from_pipeline
         if is_offline_mode() and not local_files_only:
@@ -3962,6 +4053,34 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             local_files_only = True
 
 
+        """ 获取commit_hash """
+        commit_hash = cls._get_commit_hash(
+            model_name_or_path,
+            commit_hash,
+            config,
+            
+            cache_dir,
+            force_download,
+            resume_download,
+            proxies,
+            local_files_only,
+            token,
+            revision,
+            subfolder,
+            )
+
+        """ 适配器处理 """
+        _adapter_model_path, model_name_or_path = cls._get_adapter_model_path(
+            adapter_kwargs,
+            model_name_or_path,
+            cache_dir,
+            force_download,
+            resume_download,
+            proxies,
+            local_files_only,
+            commit_hash
+        )
+        
 
         """ 设备 """
         device_map = cls._configure_device_map(device_map, low_cpu_mem_usage, ACCELERATE_MIN_VERSION)
@@ -3976,28 +4095,8 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         
         
             
-        """ 获取commit_hash """
-        commit_hash = cls._get_commit_hash(model_name_or_path,
-            commit_hash,
-            cache_dir,
-            force_download,
-            revision
-            )
+
         
-        """ 适配器处理 """
-        _adapter_model_path, model_name_or_path = cls._get_adapter_model_path(
-            adapter_kwargs,
-            model_name_or_path,
-            cache_dir,
-            force_download,
-            resume_download,
-            proxies,
-            local_files_only,
-            commit_hash
-        )
-
-
-
 
         config, hf_quantizer, is_quantized,torch_dtype,device_map, low_cpu_mem_usage, model_kwargs = cls._load_and_configure_model(
             cls,
@@ -4053,7 +4152,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         """ 下载权重文件 """
         if is_sharded:
             # resolved_archive_file becomes a list of files that point to the different checkpoint shards in this case.
-            resolved_archive_file, sharded_metadata = download_checkpoint_shard_files(  #下载权重文件
+            resolved_archive_file, sharded_metadata = get_checkpoint_shard_files(  #下载权重文件
                 model_name_or_path,
                 resolved_archive_file,
                 cache_dir=cache_dir,
@@ -4091,14 +4190,17 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         from_pt = not (from_tf | from_flax)
 
         """ 配置模型的一些属性 """
+        use_keep_in_fp32_modules = False
         if from_pt:
-            dtype_orig, state_dict, loaded_state_dict_keys,torch_dtype = cls._set_model_dtype(cls, config, state_dict, resolved_archive_file, is_sharded, weights_only, sharded_metadata, torch_dtype,hf_quantizer,gguf_path,low_cpu_mem_usage, model_name_or_path)
-
-
+            config, dtype_orig, state_dict, loaded_state_dict_keys,torch_dtype, use_keep_in_fp32_modules = cls._set_model_dtype(cls, config, state_dict, resolved_archive_file, is_sharded, weights_only, sharded_metadata, torch_dtype,hf_quantizer,gguf_path,low_cpu_mem_usage, model_name_or_path)
+        config.name_or_path = model_name_or_path
 
 
         """ 实例化模型 """
-        init_contexts, tp_device = cls._instantiate_model(_fast_init,is_quantized,low_cpu_mem_usage, tp_plan)
+        init_contexts = cls._instantiate_model(_fast_init,is_quantized,low_cpu_mem_usage)
+        
+        
+        
         config = copy.deepcopy(config)  # We do not want to modify the config inplace in from_pretrained.
         if not getattr(config, "_attn_implementation_autoset", False):
             config = cls._autoset_attn_implementation(
@@ -4112,7 +4214,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
 
         """ 配置模型的一些属性 """
-        use_keep_in_fp32_modules = False
         device_map, low_cpu_mem_usage, keep_in_fp32_modules = cls.prepare_device_map_and_quantizer(
             model, 
             config,
@@ -4249,7 +4350,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         if hf_quantizer is not None:
             hf_quantizer.postprocess_model(model)
             model.hf_quantizer = hf_quantizer
-
         if _adapter_model_path is not None:
             model.load_adapter(
                 _adapter_model_path,
@@ -4257,7 +4357,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                 token=token,
                 adapter_kwargs=adapter_kwargs,
             )
-
         if output_loading_info:
             if loading_info is None:
                 loading_info = {
@@ -4267,6 +4366,10 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
                     "error_msgs": error_msgs,
                 }
             return model, loading_info
+               
+               
+               
+               
                 
         """ 分布式训练计划 """
         if tp_plan is not None:
@@ -4280,6 +4383,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
             model.tensor_parallel(device_mesh)
 
         return model
+
 
 
 

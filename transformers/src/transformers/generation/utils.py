@@ -329,7 +329,7 @@ GenerateBeamOutput = Union[GenerateBeamDecoderOnlyOutput, GenerateBeamEncoderDec
 GenerateOutput = Union[GenerateNonBeamOutput, GenerateBeamOutput]
 
 
-class GenerationMixin:
+class GenerationMixin: #用于处理自动回归文本生成的类
     """
     A class containing all functions for auto-regressive text generation, to be used as a mixin in [`PreTrainedModel`].
 
@@ -704,40 +704,36 @@ class GenerationMixin:
 
     @staticmethod
     def _expand_inputs_for_generation(
-        expand_size: int = 1,
+        expand_size: int = 1, #3
         is_encoder_decoder: bool = False,
-        input_ids: Optional[torch.LongTensor] = None,
-        **model_kwargs,
+        input_ids: Optional[torch.LongTensor] = None, #torch.Size([1, 1])
+        **model_kwargs, #{dict "inputs_embeds","attention_mask","encoder_outputs"}
     ) -> Tuple[torch.LongTensor, Dict[str, Any]]:
         """Expands tensors from [batch_size, ...] to [batch_size * expand_size, ...]"""
         # Do not call torch.repeat_interleave if expand_size is 1 because it clones
         # the input tensor and thus requires more memory although no change is applied
         if expand_size == 1:
-            return input_ids, model_kwargs #torch.Size([1, 58])
+            return input_ids, model_kwargs
 
-        # Helper function to expand tensors in a dictionary
-        def _expand_tensor(tensor):
-            return tensor.repeat_interleave(expand_size, dim=0) if tensor is not None else None
+        def _expand_dict_for_generation(dict_to_expand):
+            for key in dict_to_expand:
+                if (
+                    key != "cache_position"
+                    and dict_to_expand[key] is not None
+                    and isinstance(dict_to_expand[key], torch.Tensor)
+                ):
+                    dict_to_expand[key] = dict_to_expand[key].repeat_interleave(expand_size, dim=0)
+            return dict_to_expand
 
-        def _expand_dict(dict_to_expand):
-            return {
-                key: _expand_tensor(value) if isinstance(value, torch.Tensor) and key != "cache_position" else value
-                for key, value in dict_to_expand.items()
-            }
-
-        # Expand input_ids if provided
         if input_ids is not None:
-            input_ids = _expand_tensor(input_ids)
+            input_ids = input_ids.repeat_interleave(expand_size, dim=0) #torch.Size([3, 1])
 
-        # Expand model kwargs
-        model_kwargs = _expand_dict(model_kwargs)
+        model_kwargs = _expand_dict_for_generation(model_kwargs)
 
-        # Expand encoder outputs for encoder-decoder models
         if is_encoder_decoder:
-            encoder_outputs = model_kwargs.get("encoder_outputs")
-            if encoder_outputs is None:
-                raise ValueError("If `is_encoder_decoder` is True, `encoder_outputs` must be defined.")
-            model_kwargs["encoder_outputs"] = _expand_dict(encoder_outputs)
+            if model_kwargs.get("encoder_outputs") is None:
+                raise ValueError("If `is_encoder_decoder` is True, make sure that `encoder_outputs` is defined.")
+            model_kwargs["encoder_outputs"] = _expand_dict_for_generation(model_kwargs["encoder_outputs"])
 
         return input_ids, model_kwargs
 
@@ -2252,6 +2248,46 @@ class GenerationMixin:
         )
 
 
+    def _handle_beam_sample(
+        self,
+        generation_config,
+        input_ids,
+        inputs_tensor,
+        prepared_logits_processor,
+        prepared_stopping_criteria,
+        synced_gpus,
+        model_kwargs,
+    ):
+        beam_scorer = BeamSearchScorer(
+            batch_size=input_ids.shape[0],
+            num_beams=generation_config.num_beams, #3
+            device=inputs_tensor.device, #device(type='cuda', index=0)
+            length_penalty=generation_config.length_penalty, #1.0
+            do_early_stopping=generation_config.early_stopping, #True
+            num_beam_hyps_to_keep=generation_config.num_return_sequences, #1
+            max_length=generation_config.max_length, #1025
+        )
+
+        # 12. interleave input_ids with `num_beams` additional sequences per batch   这里出现的bug
+        input_ids, model_kwargs = self._expand_inputs_for_generation(
+            input_ids=input_ids, #torch.Size([1, 1])
+            expand_size=generation_config.num_beams, #3
+            is_encoder_decoder=self.config.is_encoder_decoder, #true
+            **model_kwargs,
+        )
+
+        # 13. run beam sample 猜测这里进行前向推理
+        result = self._beam_search(
+            input_ids,
+            beam_scorer,
+            logits_processor=prepared_logits_processor,
+            stopping_criteria=prepared_stopping_criteria,
+            generation_config=generation_config,
+            synced_gpus=synced_gpus,
+            **model_kwargs,
+        )
+
+        return result
     def _handle_beam_search(
         self,
         generation_config,
@@ -2261,9 +2297,9 @@ class GenerationMixin:
         prepared_stopping_criteria,
         synced_gpus,
         model_kwargs,
-        mode="beam_search",
     ):
         # 初始化 beam scorer
+        # 11. prepare beam search scorer
         beam_scorer = BeamSearchScorer(
             batch_size=input_ids.shape[0],
             num_beams=generation_config.num_beams,
@@ -2271,40 +2307,27 @@ class GenerationMixin:
             length_penalty=generation_config.length_penalty,
             do_early_stopping=generation_config.early_stopping,
             num_beam_hyps_to_keep=generation_config.num_return_sequences,
+            num_beam_groups=generation_config.num_beam_groups,
             max_length=generation_config.max_length,
-            num_beam_groups=generation_config.num_beam_groups if mode == "group_beam_search" else None,
         )
-
-        # 扩展 input_ids
+        # 12. interleave input_ids with `num_beams` additional sequences per batch
         input_ids, model_kwargs = self._expand_inputs_for_generation(
             input_ids=input_ids,
             expand_size=generation_config.num_beams,
             is_encoder_decoder=self.config.is_encoder_decoder,
             **model_kwargs,
         )
-
-        # 执行 beam search
-        if mode == "group_beam_search":
-            return self._group_beam_search(
-                input_ids=input_ids,
-                beam_scorer=beam_scorer,
-                logits_processor=prepared_logits_processor,
-                stopping_criteria=prepared_stopping_criteria,
-                generation_config=generation_config,
-                synced_gpus=synced_gpus,
-                **model_kwargs,
-            )
-        else:
-            return self._beam_search(
-                input_ids=input_ids,
-                beam_scorer=beam_scorer,
-                logits_processor=prepared_logits_processor,
-                stopping_criteria=prepared_stopping_criteria,
-                generation_config=generation_config,
-                synced_gpus=synced_gpus,
-                **model_kwargs,
-            )
-
+        # 13. run beam search
+        result = self._group_beam_search(
+            input_ids,
+            beam_scorer,
+            logits_processor=prepared_logits_processor,
+            stopping_criteria=prepared_stopping_criteria,
+            generation_config=generation_config,
+            synced_gpus=synced_gpus,
+            **model_kwargs,
+        )
+        return result
 
     @torch.no_grad()
     def generate(
@@ -2455,7 +2478,7 @@ class GenerationMixin:
                 model_kwargs, # attention_mask:torch.Size([1, 58]) input_features:torch.Size([2, 128, 3000]) fearure_attention_mask:torch.Size([2, 3000])
             )
         elif generation_mode in (GenerationMode.BEAM_SAMPLE, GenerationMode.BEAM_SEARCH):
-            result = self._handle_beam_search(
+            result = self._handle_beam_sample( #走这里
                 generation_config,
                 input_ids,
                 inputs_tensor,
@@ -2463,7 +2486,6 @@ class GenerationMixin:
                 prepared_stopping_criteria,
                 synced_gpus,
                 model_kwargs,
-                mode="beam_search",
             )
         elif generation_mode == GenerationMode.GROUP_BEAM_SEARCH:
             result = self._handle_beam_search(
@@ -2474,9 +2496,8 @@ class GenerationMixin:
                 prepared_stopping_criteria,
                 synced_gpus,
                 model_kwargs,
-                mode="group_beam_search",
             )
-
+        elif generation_mode == GenerationMode.CONSTRAINED_BEAM_SEARCH:
             final_constraints = []
             if generation_config.constraints is not None:
                 final_constraints = generation_config.constraints
@@ -3513,10 +3534,10 @@ class GenerationMixin:
         sequential = generation_config.low_memory
         do_sample = generation_config.do_sample
 
-        batch_size = len(beam_scorer._beam_hyps)
-        num_beams = beam_scorer.num_beams
+        batch_size = len(beam_scorer._beam_hyps) #1
+        num_beams = beam_scorer.num_beams #3
 
-        batch_beam_size, cur_len = input_ids.shape
+        batch_beam_size, cur_len = input_ids.shape #3 1
         model_kwargs = self._get_initial_cache_position(input_ids, model_kwargs)
 
         if num_beams * batch_size != batch_beam_size:
@@ -3545,7 +3566,7 @@ class GenerationMixin:
         # of the first beam are considered to avoid sampling the exact same tokens across all beams.
         beam_scores = torch.zeros((batch_size, num_beams), dtype=torch.float, device=input_ids.device)
         beam_scores[:, 1:] = -1e9
-        beam_scores = beam_scores.view((batch_size * num_beams,))
+        beam_scores = beam_scores.view((batch_size * num_beams,)) #torch.Size([3])
 
         this_peer_finished = False
 

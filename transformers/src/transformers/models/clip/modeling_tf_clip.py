@@ -502,11 +502,11 @@ class TFCLIPEncoder(keras.layers.Layer):
         all_hidden_states = () if output_hidden_states else None
         all_attentions = () if output_attentions else None
 
-        for i, layer_module in enumerate(self.layers):
+        for i, layer_i in enumerate(self.layers):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_outputs = layer_module(
+            layer_outputs = layer_i(
                 hidden_states=hidden_states,
                 attention_mask=attention_mask,
                 causal_attention_mask=causal_attention_mask,
@@ -1455,3 +1455,5 @@ class TFCLIPModel(TFCLIPPreTrainedModel):
         if getattr(self, "clip", None) is not None:
             with tf.name_scope(self.clip.name):
                 self.clip.build(None)
+                
+__all__ = ["TFCLIPModel", "TFCLIPPreTrainedModel", "TFCLIPTextModel", "TFCLIPVisionModel"]

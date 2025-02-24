@@ -621,7 +621,7 @@ class _BaseAutoModelClass:
                 commit_hash = getattr(config, "_commit_hash", None)
         return commit_hash
 
-    def handle_adapter_kwargs(model_name_or_path, commit_hash, adapter_kwargs, hub_kwargs, token):
+    def handle_adapter_kwargs(model_name_or_path, commit_hash, adapter_kwargs, token):
         """Handle adapter configuration if available."""
         if is_peft_available():
             if adapter_kwargs is None:
@@ -692,20 +692,38 @@ class _BaseAutoModelClass:
         config = kwargs.pop("config", None)
         trust_remote_code = kwargs.pop("trust_remote_code", None)
         kwargs["_from_auto"] = True
+        hub_kwargs_names = [
+            "cache_dir",
+            "force_download",
+            "local_files_only",
+            "proxies",
+            "resume_download",
+            "revision",
+            "subfolder",
+            "use_auth_token",
+            "token",
+        ]
+        hub_kwargs = {name: kwargs.pop(name) for name in hub_kwargs_names if name in kwargs}
         code_revision = kwargs.pop("code_revision", None)
-        
-        # Handle hub kwargs
-        hub_kwargs, token = cls.handle_hub_kwargs(kwargs)
-
-        # Resolve commit hash
         commit_hash = kwargs.pop("_commit_hash", None)
+        adapter_kwargs = kwargs.pop("adapter_kwargs", None)
+
+        token = hub_kwargs.pop("token", None)
+        if token is not None:
+            hub_kwargs["token"] = token
+            
+            
         commit_hash = cls.resolve_commit_hash(config, model_name_or_path, commit_hash, hub_kwargs)
 
+
+
+
         # Handle adapter kwargs
-        adapter_kwargs = kwargs.pop("adapter_kwargs", None)
         model_name_or_path, adapter_kwargs = cls.handle_adapter_kwargs(
-            model_name_or_path, commit_hash, adapter_kwargs, hub_kwargs, token
+            model_name_or_path, commit_hash, adapter_kwargs, token
         )
+
+
 
         # Load configuration
         if not isinstance(config, PretrainedConfig):
@@ -713,13 +731,20 @@ class _BaseAutoModelClass:
                 model_name_or_path, kwargs, hub_kwargs, commit_hash, trust_remote_code, code_revision
             ) #模型 kwargs commit_hash -》 GroundingDinoConfig
 
+
+
+
+
         # Determine the model class
+        kwargs["adapter_kwargs"] = adapter_kwargs
         model_class = cls.determine_model_class( #找到内存空间
             config, cls, model_name_or_path, code_revision, hub_kwargs, kwargs, trust_remote_code
         )
 
+
+
+
         # Set adapter kwargs and return the model instance 使用其他的配置参数
-        kwargs["adapter_kwargs"] = adapter_kwargs
         return model_class.from_pretrained(
             model_name_or_path, *model_args, config=config, **hub_kwargs, **kwargs #str () 配置类 {} {'adapter_kwargs': {}}
         )

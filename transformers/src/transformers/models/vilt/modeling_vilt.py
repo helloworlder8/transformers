@@ -99,18 +99,18 @@ class ViltEmbeddings(nn.Module):
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
         self.config = config
 
-    def visual_embed(self, pixel_values, pixel_mask, max_image_length=200):
+    def visual_embeddings(self, pixel_values, pixel_mask, max_image_length=200): #torch.Size([1, 3, 384, 512]) torch.Size([1, 384, 512]) -1
         _, _, ph, pw = self.patch_embeddings.projection.weight.shape
 
-        x = self.patch_embeddings(pixel_values)
-        x_mask = pixel_mask[:, None, :, :].float()
-        x_mask = nn.functional.interpolate(x_mask, size=(x.shape[2], x.shape[3])).long()
-        x_h = x_mask[:, 0].sum(dim=1)[:, 0]
-        x_w = x_mask[:, 0].sum(dim=2)[:, 0]
+        patch_embeds = self.patch_embeddings(pixel_values) #torch.Size([1, 768, 12, 16]) batch D patch_size patch_size
+        patch_mask = pixel_mask[:, None, :, :].float()
+        patch_mask = nn.functional.interpolate(patch_mask, size=(patch_embeds.shape[2], patch_embeds.shape[3])).long() #torch.Size([1, 1, 12, 16])
+        num_patch_height = patch_mask[:, 0].sum(dim=1)[:, 0] #[:, 0]是挑选维度
+        num_patch_width = patch_mask[:, 0].sum(dim=2)[:, 0]
 
-        batch_size, num_channels, height, width = x.shape
-        patch_dim = self.config.image_size // self.config.patch_size
-        spatial_pos = self.position_embeddings[:, 1:, :].transpose(1, 2).view(1, num_channels, patch_dim, patch_dim)
+        batch_size, num_channels, patch_height, patch_width = patch_embeds.shape #1 768 12 16
+        num_patch = self.config.image_size // self.config.patch_size
+        spatial_pos = self.position_embeddings[:, 1:, :].transpose(1, 2).view(1, num_channels, num_patch, num_patch) #->torch.Size([1, 768, 12, 12])
         pos_embed = torch.cat(
             [
                 nn.functional.pad(
@@ -120,96 +120,96 @@ class ViltEmbeddings(nn.Module):
                         mode="bilinear",
                         align_corners=True,
                     ),
-                    (0, width - w, 0, height - h),
+                    (0, patch_width - w, 0, patch_height - h),
                 )
-                for h, w in zip(x_h, x_w)
+                for h, w in zip(num_patch_height, num_patch_width)
             ],
             dim=0,
-        )
+        ) #torch.Size([1, 768, 12, 16])
 
-        pos_embed = pos_embed.flatten(2).transpose(1, 2)
-        x = x.flatten(2).transpose(1, 2)
+        pos_embed = pos_embed.flatten(2).transpose(1, 2) #torch.Size([1, 192, 768])
+        patch_embeds = patch_embeds.flatten(2).transpose(1, 2) #torch.Size([1, 192, 768])
         # Set `device` here, otherwise `patch_index` will always be on `CPU` and will fail near the end for torch>=1.13
         patch_index = torch.stack(
-            meshgrid(torch.arange(x_mask.shape[-2]), torch.arange(x_mask.shape[-1]), indexing="ij"), dim=-1
-        ).to(device=x_mask.device)
-        patch_index = patch_index[None, None, :, :, :]
-        patch_index = patch_index.expand(x_mask.shape[0], x_mask.shape[1], -1, -1, -1)
-        patch_index = patch_index.flatten(1, 3)
-        x_mask = x_mask.flatten(1)
+            meshgrid(torch.arange(patch_mask.shape[-2]), torch.arange(patch_mask.shape[-1]), indexing="ij"), dim=-1
+        ).to(device=patch_mask.device) #torch.Size([12, 16, 2])
+        patch_index = patch_index[None, None, :, :, :] #torch.Size([1, 1, 12, 16, 2])
+        patch_index = patch_index.expand(patch_mask.shape[0], patch_mask.shape[1], -1, -1, -1)
+        patch_index = patch_index.flatten(1, 3) #torch.Size([1, 192, 2])
+        patch_mask = patch_mask.flatten(1) #torch.Size([1, 192])
 
         if max_image_length < 0 or max_image_length is None or not isinstance(max_image_length, int):
             # suppose aug is 800 x 1333, then, maximum effective res is 800 x 1333 (if one side gets bigger, the other will be constrained and be shrinked)
             # (800 // self.patch_size) * (1333 // self.patch_size) is the maximum number of patches that single image can get.
             # if self.patch_size = 32, 25 * 41 = 1025
             # if res is 384 x 640, 12 * 20 = 240
-            effective_resolution = x_h * x_w
+            effective_resolution = num_patch_height * num_patch_width
             max_image_length = effective_resolution.max()
         else:
-            effective_resolution = x_h * x_w
+            effective_resolution = num_patch_height * num_patch_width
             max_image_length = min(effective_resolution.max(), max_image_length)
 
-        valid_idx = x_mask.nonzero(as_tuple=False)
-        non_valid_idx = (1 - x_mask).nonzero(as_tuple=False)
+        valid_idx = patch_mask.nonzero(as_tuple=False) #torch.Size([192, 2])
+        non_valid_idx = (1 - patch_mask).nonzero(as_tuple=False) #torch.Size([0, 2])
         unique_rows = valid_idx[:, 0].unique()
         valid_row_idx = [valid_idx[valid_idx[:, 0] == u] for u in unique_rows]
         non_valid_row_idx = [non_valid_idx[non_valid_idx[:, 0] == u] for u in unique_rows]
 
-        valid_nums = [v.size(0) for v in valid_row_idx]
-        non_valid_nums = [v.size(0) for v in non_valid_row_idx]
-        pad_nums = [max_image_length - v for v in valid_nums]
+        valid_nums = [v.size(0) for v in valid_row_idx] #[192]
+        non_valid_nums = [v.size(0) for v in non_valid_row_idx] #[0]
+        pad_nums = [max_image_length - v for v in valid_nums] #[]
 
         select = []
-        for i, (v, nv, p) in enumerate(zip(valid_nums, non_valid_nums, pad_nums)):
+        for idx, (v, nv, p) in enumerate(zip(valid_nums, non_valid_nums, pad_nums)):
             if p <= 0:
                 valid_choice = torch.multinomial(torch.ones(v).float(), max_image_length)
-                select.append(valid_row_idx[i][valid_choice])
+                select.append(valid_row_idx[idx][valid_choice])
             else:
                 pad_choice = torch.multinomial(torch.ones(nv).float(), p, replacement=True)
-                select.append(torch.cat([valid_row_idx[i], non_valid_row_idx[i][pad_choice]], dim=0))
+                select.append(torch.cat([valid_row_idx[idx], non_valid_row_idx[idx][pad_choice]], dim=0))
 
-        select = torch.cat(select, dim=0)
-        x = x[select[:, 0], select[:, 1]].view(batch_size, -1, num_channels)
-        x_mask = x_mask[select[:, 0], select[:, 1]].view(batch_size, -1)
+        select = torch.cat(select, dim=0) #torch.Size([192, 2])
+        patch_embeds = patch_embeds[select[:, 0], select[:, 1]].view(batch_size, -1, num_channels) #torch.Size([1, 192, 768])
+        patch_mask = patch_mask[select[:, 0], select[:, 1]].view(batch_size, -1) #torch.Size([1, 192])
         # `patch_index` should be on the same device as `select` (for torch>=1.13), which is ensured at definition time.
         patch_index = patch_index[select[:, 0], select[:, 1]].view(batch_size, -1, 2)
         pos_embed = pos_embed[select[:, 0], select[:, 1]].view(batch_size, -1, num_channels)
 
-        cls_tokens = self.cls_token.expand(batch_size, -1, -1)
-        x = torch.cat((cls_tokens, x), dim=1)
+        cls_tokens = self.cls_token.expand(batch_size, -1, -1) #torch.Size([1, 1, 768])
+        patch_embeds = torch.cat((cls_tokens, patch_embeds), dim=1) #torch.Size([1, 193, 768])
         pos_embed = torch.cat(
             (self.position_embeddings[:, 0, :][:, None, :].expand(batch_size, -1, -1), pos_embed), dim=1
         )
-        x = x + pos_embed
-        x = self.dropout(x)
+        patch_embeds = patch_embeds + pos_embed
+        patch_embeds = self.dropout(patch_embeds)
 
-        x_mask = torch.cat([torch.ones(x_mask.shape[0], 1).to(x_mask), x_mask], dim=1)
+        patch_mask = torch.cat([torch.ones(patch_mask.shape[0], 1).to(patch_mask), patch_mask], dim=1)
 
-        return x, x_mask, (patch_index, (height, width))
+        return patch_embeds, patch_mask, (patch_index, (patch_height, patch_width))
 
     def forward(
         self,
-        input_ids,
-        attention_mask,
-        token_type_ids,
-        pixel_values,
-        pixel_mask,
-        inputs_embeds,
-        vision_embeds,
-        image_token_type_idx=1,
+        input_ids, #torch.Size([1, 4])
+        attention_mask, #torch.Size([1, 4])
+        token_type_ids, #torch.Size([1, 4])
+        pixel_values, #torch.Size([1, 3, 384, 512])
+        pixel_mask, #torch.Size([1, 384, 512])
+        inputs_embeds, #none
+        vision_embeds, #none
+        image_token_type_idx=1, #none
     ):
-        # PART 1: text embeddings
+        """ 处理文本嵌入 """
         text_embeds = self.text_embeddings(
-            input_ids=input_ids, token_type_ids=token_type_ids, inputs_embeds=inputs_embeds
+            input_ids=input_ids, inputs_embeds=inputs_embeds, token_type_ids=token_type_ids
         )
-
-        # PART 2: patch embeddings (with interpolated position encodings)
+# patch_embeds, patch_mask, (patch_index, (patch_height, patch_width))
+        """ 处理视觉嵌入 """
         if vision_embeds is None:
-            vision_embeds, image_masks, patch_index = self.visual_embed(
+            vision_embeds, vision_masks, patch_index = self.visual_embeddings(
                 pixel_values, pixel_mask, max_image_length=self.config.max_image_length
-            )
+            ) #torch.Size([1, 3, 384, 512]) torch.Size([1, 384, 512]) -1
         else:
-            image_masks = pixel_mask.flatten(1)
+            vision_masks = pixel_mask.flatten(1)
 
         # PART 3: add modality type embeddings
         # 0 indicates text, 1 indicates image, 2 is optionally used when a second image is provided (NLVR2)
@@ -219,12 +219,12 @@ class ViltEmbeddings(nn.Module):
             torch.zeros_like(attention_mask, dtype=torch.long, device=text_embeds.device)
         )
         vision_embeds = vision_embeds + self.token_type_embeddings(
-            torch.full_like(image_masks, image_token_type_idx, dtype=torch.long, device=text_embeds.device)
+            torch.full_like(vision_masks, image_token_type_idx, dtype=torch.long, device=text_embeds.device)
         )
 
         # PART 4: concatenate
         embeddings = torch.cat([text_embeds, vision_embeds], dim=1)
-        masks = torch.cat([attention_mask, image_masks], dim=1)
+        masks = torch.cat([attention_mask, vision_masks], dim=1)
 
         return embeddings, masks
 
@@ -251,20 +251,15 @@ class TextEmbeddings(nn.Module):
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
 
-    def forward(self, input_ids=None, token_type_ids=None, position_ids=None, inputs_embeds=None):
-        if input_ids is not None:
-            input_shape = input_ids.size()
-        else:
-            input_shape = inputs_embeds.size()[:-1]
-
+    def forward(self, input_ids=None, inputs_embeds=None, token_type_ids=None, position_ids=None): #torch.Size([1, 4]) none torch.Size([1, 4]) none
+        # 确定输入形状和序列长度
+        input_shape = input_ids.size() if input_ids is not None else inputs_embeds.size()[:-1]
         seq_length = input_shape[1]
 
+        """ position_ids """
         if position_ids is None:
             position_ids = self.position_ids[:, :seq_length]
-
-        # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
-        # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
-        # issue #5664
+        """ token_type_ids """
         if token_type_ids is None:
             if hasattr(self, "token_type_ids"):
                 buffered_token_type_ids = self.token_type_ids[:, :seq_length]
@@ -273,17 +268,26 @@ class TextEmbeddings(nn.Module):
             else:
                 token_type_ids = torch.zeros(input_shape, dtype=torch.long, device=self.position_ids.device)
 
+
+        """ 必须要生成 inputs_embeds """
         if inputs_embeds is None:
             inputs_embeds = self.word_embeddings(input_ids)
-        token_type_embeddings = self.token_type_embeddings(token_type_ids)
 
-        embeddings = inputs_embeds + token_type_embeddings
+        """ 嵌入 token_type """
+        token_type_embeds = self.token_type_embeddings(token_type_ids)
+        text_embeds = inputs_embeds + token_type_embeds
+
+        """ 嵌入位置信息 """
         if self.position_embedding_type == "absolute":
             position_embeddings = self.position_embeddings(position_ids)
-            embeddings += position_embeddings
-        embeddings = self.LayerNorm(embeddings)
-        embeddings = self.dropout(embeddings)
-        return embeddings
+            text_embeds += position_embeddings
+
+        # 执行 LayerNorm 和 Dropout
+        text_embeds = self.LayerNorm(text_embeds)
+        text_embeds = self.dropout(text_embeds)
+
+        return text_embeds
+
 
 
 class ViltPatchEmbeddings(nn.Module):
@@ -307,7 +311,7 @@ class ViltPatchEmbeddings(nn.Module):
         self.projection = nn.Conv2d(num_channels, hidden_size, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, pixel_values):
-        batch_size, num_channels, height, width = pixel_values.shape
+        batch_size, num_channels, patch_height, patch_width = pixel_values.shape
         if num_channels != self.num_channels:
             raise ValueError(
                 "Make sure that the channel dimension of the pixel values match with the one set in the configuration."
@@ -344,19 +348,19 @@ class ViltSelfAttention(nn.Module):
     def forward(self, hidden_states, attention_mask=None, head_mask=None, output_attentions=False):
         mixed_query_layer = self.query(hidden_states)
 
-        key_layer = self.transpose_for_scores(self.key(hidden_states))
+        key_layer = self.transpose_for_scores(self.key(hidden_states)) #torch.Size([1, 12, 197, 64]) batch head token D
         value_layer = self.transpose_for_scores(self.value(hidden_states))
         query_layer = self.transpose_for_scores(mixed_query_layer)
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
-        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2)) #torch.Size([1, 12, 197, 64]) torch.Size([1, 12, 197, 64]) ->torch.Size([1, 12, 197, 197]) batch head patch patch
         attention_scores = attention_scores / math.sqrt(self.attention_head_size)
-        if attention_mask is not None:
+        if attention_mask is not None: #torch.Size([1, 1, 1, 197])
             # Apply the attention mask is (precomputed for all layers in BertModel forward() function)
-            attention_scores = attention_scores + attention_mask
+            attention_scores = attention_scores + attention_mask #torch.Size([1, 12, 197, 197]) batch head patch patch
 
         # Normalize the attention scores to probabilities.
-        attention_probs = nn.Softmax(dim=-1)(attention_scores)
+        attention_probs = nn.Softmax(dim=-1)(attention_scores) #torch.Size([1, 12, 197, 197])
 
         # This is actually dropping out entire tokens to attend to, which might
         # seem a bit unusual, but is taken from the original Transformer paper.
@@ -374,7 +378,7 @@ class ViltSelfAttention(nn.Module):
 
         outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
 
-        return outputs
+        return outputs #(torch.Size([1, 197, 768]))
 
 
 # Copied from transformers.models.vit.modeling_vit.ViTSelfOutput with ViT->Vilt
@@ -476,7 +480,7 @@ class ViltLayer(nn.Module):
         self.layernorm_before = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.layernorm_after = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
 
-    def forward(self, hidden_states, attention_mask=None, head_mask=None, output_attentions=False):
+    def forward(self, hidden_states, attention_mask=None, head_mask=None, output_attentions=False): #torch.Size([1, 197, 768]) torch.Size([1, 1, 1, 197]) none false
         self_attention_outputs = self.attention(
             self.layernorm_before(hidden_states),  # in ViLT, layernorm is applied before self-attention
             attention_mask,
@@ -510,32 +514,32 @@ class ViltEncoder(nn.Module):
 
     def forward(
         self,
-        hidden_states,
-        attention_mask=None,
-        head_mask=None,
+        hidden_states, #torch.Size([1, 197, 768])
+        attention_mask=None, #torch.Size([1, 1, 1, 197])
+        head_mask=None, # [12*none]
         output_attentions=False,
         output_hidden_states=False,
         return_dict=True,
     ):
-        all_hidden_states = () if output_hidden_states else None
-        all_self_attentions = () if output_attentions else None
+        all_hidden_states = () if output_hidden_states else None #none
+        all_self_attentions = () if output_attentions else None #none
 
-        for i, layer_module in enumerate(self.layer):
+        for idx, layer_i in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_head_mask = head_mask[i] if head_mask is not None else None
+            layer_head_mask = head_mask[idx] if head_mask is not None else None #每一层是不是需要掩膜
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+                    layer_i.__call__,
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
                     output_attentions,
                 )
             else:
-                layer_outputs = layer_module(hidden_states, attention_mask, layer_head_mask, output_attentions)
+                layer_outputs = layer_i(hidden_states, attention_mask, layer_head_mask, output_attentions) #torch.Size([1, 197, 768]) torch.Size([1, 1, 1, 197]) none false
 
             hidden_states = layer_outputs[0]
 
@@ -613,15 +617,15 @@ VILT_INPUTS_DOCSTRING = r"""
             - 1 corresponds to a *sentence B* token.
             [What are token type IDs?](../glossary#token-type-ids)
 
-        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, height, width)`):
+        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_channels, patch_height, patch_width)`):
             Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
             [`ViltImageProcessor.__call__`] for details.
 
-        pixel_mask (`torch.LongTensor` of shape `(batch_size, height, width)`, *optional*):
+        pixel_mask (`torch.LongTensor` of shape `(batch_size, patch_height, patch_width)`, *optional*):
             Mask to avoid performing attention on padding pixel values. Mask values selected in `[0, 1]`:
 
-            - 1 for pixels that are real (i.e. **not masked**),
-            - 0 for pixels that are padding (i.e. **masked**).
+            - 1 for pixels that are real (idx.e. **not masked**),
+            - 0 for pixels that are padding (idx.e. **masked**).
             `What are attention masks? <../glossary.html#attention-mask>`__
 
         head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
@@ -668,15 +672,15 @@ VILT_IMAGES_AND_TEXT_CLASSIFICATION_INPUTS_DOCSTRING = r"""
             - 1 corresponds to a *sentence B* token.
             [What are token type IDs?](../glossary#token-type-ids)
 
-        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_images, num_channels, height, width)`):
+        pixel_values (`torch.FloatTensor` of shape `(batch_size, num_images, num_channels, patch_height, patch_width)`):
             Pixel values. Pixel values can be obtained using [`AutoImageProcessor`]. See
             [`ViltImageProcessor.__call__`] for details.
 
-        pixel_mask (`torch.LongTensor` of shape `(batch_size, num_images, height, width)`, *optional*):
+        pixel_mask (`torch.LongTensor` of shape `(batch_size, num_images, patch_height, patch_width)`, *optional*):
             Mask to avoid performing attention on padding pixel values. Mask values selected in `[0, 1]`:
 
-            - 1 for pixels that are real (i.e. **not masked**),
-            - 0 for pixels that are padding (i.e. **masked**).
+            - 1 for pixels that are real (idx.e. **not masked**),
+            - 0 for pixels that are padding (idx.e. **masked**).
             `What are attention masks? <../glossary.html#attention-mask>`__
 
         head_mask (`torch.FloatTensor` of shape `(num_heads,)` or `(num_layers, num_heads)`, *optional*):
@@ -736,6 +740,14 @@ class ViltModel(ViltPreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.encoder.layer[layer].attention.prune_heads(heads)
 
+
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
     @add_start_docstrings_to_model_forward(VILT_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=BaseModelOutputWithPooling, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -775,78 +787,92 @@ class ViltModel(ViltPreTrainedModel):
         >>> outputs = model(**inputs)
         >>> last_hidden_states = outputs.last_hidden_state
         ```"""
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
 
+        """ 文本处理 """
+        # Check if both input_ids and inputs_embeds are specified
         if input_ids is not None and inputs_embeds is not None:
             raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
-        elif input_ids is not None:
+        # 检查是否同时指定了 input_ids 和 inputs_embeds
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        # 确定输入形状：如果提供了 input_ids，使用其大小；如果提供了 inputs_embeds，使用其前几个维度（去掉最后一个）
+        if input_ids is not None:
             self.warn_if_padding_and_no_attention_mask(input_ids, attention_mask)
-            input_shape = input_ids.size()
+            input_shape = input_ids.size()  # torch.Size([1, 4])
         elif inputs_embeds is not None:
-            input_shape = inputs_embeds.size()[:-1]
+            input_shape = inputs_embeds.size()[:-1]  # 去掉最后一个维度
         else:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
-
-        text_batch_size, seq_length = input_shape
+        # 从输入形状中获取文本批大小和序列长度
+        text_batch_size, seq_length = input_shape  # 1, 4
         device = input_ids.device if input_ids is not None else inputs_embeds.device
-
+        # 如果没有提供 attention_mask，设为全1
         if attention_mask is None:
-            attention_mask = torch.ones(((text_batch_size, seq_length)), device=device)
+            attention_mask = torch.ones((text_batch_size, seq_length), device=device)
 
+
+        """ 像素处理 """
+        # 检查是否同时指定了 pixel_values 和 vision_embeds
         if pixel_values is not None and vision_embeds is not None:
             raise ValueError("You cannot specify both pixel_values and vision_embeds at the same time")
-        elif pixel_values is None and vision_embeds is None:
+        # 确保至少提供了 pixel_values 或 vision_embeds 其中之一
+        if pixel_values is None and vision_embeds is None:
             raise ValueError("You have to specify either pixel_values or vision_embeds")
-
+        # 获取图像批大小：如果提供了 pixel_values，则使用其批大小；否则使用 vision_embeds 的批大小
         image_batch_size = pixel_values.shape[0] if pixel_values is not None else vision_embeds.shape[0]
-        if image_batch_size != text_batch_size:
-            raise ValueError("The text inputs and image inputs need to have the same batch size")
+        # 如果没有提供 pixel_mask，设为全1
         if pixel_mask is None:
             pixel_mask = torch.ones((image_batch_size, self.config.image_size, self.config.image_size), device=device)
+            
+        """ 文本像素对齐 """
+        # 确保文本输入和图像输入具有相同的批大小
+        if image_batch_size != text_batch_size:
+            raise ValueError("The text inputs and image inputs need to have the same batch size")
+
+
+
+
 
         # Prepare head mask if needed
         # 1.0 in head_mask indicate we keep the head
         # attention_probs has shape bsz x n_heads x N x N
         # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
         # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
-        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers)
+        head_mask = self.get_head_mask(head_mask, self.config.num_hidden_layers) #none 12
 
-        embedding_output, attention_mask = self.embeddings(
-            input_ids,
-            attention_mask,
-            token_type_ids,
-            pixel_values,
-            pixel_mask,
-            inputs_embeds,
-            vision_embeds,
-            image_token_type_idx=image_token_type_idx,
+        embedding_output, attention_mask = self.embeddings( #->torch.Size([1, 197, 768]) torch.Size([1, 197])
+            input_ids, #torch.Size([1, 4])
+            attention_mask, #torch.Size([1, 4])
+            token_type_ids, #torch.Size([1, 4])
+            pixel_values, #torch.Size([1, 3, 384, 512])
+            pixel_mask, #torch.Size([1, 384, 512])
+            inputs_embeds, #none
+            vision_embeds, #none
+            image_token_type_idx=image_token_type_idx, #none
         )
 
         # We can provide a self-attention mask of dimensions [batch_size, from_seq_length, to_seq_length]
         # ourselves in which case we just need to make it broadcastable to all heads.
-        extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape)
+        extended_attention_mask: torch.Tensor = self.get_extended_attention_mask(attention_mask, input_shape) #torch.Size([1, 1, 1, 197])
 
         encoder_outputs = self.encoder(
             embedding_output,
             attention_mask=extended_attention_mask,
-            head_mask=head_mask,
+            head_mask=head_mask, #[12*none]
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
         )
-        sequence_output = encoder_outputs[0]
-        sequence_output = self.layernorm(sequence_output)
-        pooled_output = self.pooler(sequence_output) if self.pooler is not None else None
+        last_hidden_state = encoder_outputs[0]
+        last_hidden_state = self.layernorm(last_hidden_state)
+        pooled_output = self.pooler(last_hidden_state) if self.pooler is not None else None
 
         if not return_dict:
-            return (sequence_output, pooled_output) + encoder_outputs[1:]
+            return (last_hidden_state, pooled_output) + encoder_outputs[1:]
 
         return BaseModelOutputWithPooling(
-            last_hidden_state=sequence_output,
+            last_hidden_state=last_hidden_state,
             pooler_output=pooled_output,
             all_hidden_states=encoder_outputs.all_hidden_states,
             all_attentions=encoder_outputs.all_attentions,
@@ -862,8 +888,8 @@ class ViltPooler(nn.Module):
     def forward(self, hidden_states):
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
-        first_token_tensor = hidden_states[:, 0]
-        pooled_output = self.dense(first_token_tensor)
+        first_token = hidden_states[:, 0]
+        pooled_output = self.dense(first_token)
         pooled_output = self.activation(pooled_output)
         return pooled_output
 
@@ -945,7 +971,7 @@ class ViltForMaskedLM(ViltPreTrainedModel):
 
         >>> # gradually fill in the MASK tokens, one by one
         >>> with torch.no_grad():
-        ...     for i in range(tl):
+        ...     for idx in range(tl):
         ...         encoded = processor.tokenizer(inferred_token)
         ...         input_ids = torch.tensor(encoded.input_ids)
         ...         encoded = encoded["input_ids"][0][1:-1]
@@ -982,10 +1008,10 @@ class ViltForMaskedLM(ViltPreTrainedModel):
             return_dict=return_dict,
         )
 
-        sequence_output, pooled_output = outputs[:2]
+        last_hidden_state, pooled_output = outputs[:2]
         # split up final hidden states into text and image features
         text_seq_len = input_ids.shape[1] if input_ids is not None else inputs_embeds.shape[1]
-        text_features, _ = (sequence_output[:, :text_seq_len], sequence_output[:, text_seq_len:])
+        text_features, _ = (last_hidden_state[:, :text_seq_len], last_hidden_state[:, text_seq_len:])
 
         mlm_logits = self.mlm_score(text_features)
 
@@ -1356,18 +1382,18 @@ class ViltForImagesAndTextClassification(ViltPreTrainedModel):
         pooler_outputs = []
         hidden_states = [] if output_hidden_states else None
         attentions = [] if output_attentions else None
-        for i in range(num_images):
+        for idx in range(num_images):
             # forward every image through the model
             outputs = self.vilt(
                 input_ids,
                 attention_mask=attention_mask,
                 token_type_ids=token_type_ids,
-                pixel_values=pixel_values[:, i, :, :, :] if pixel_values is not None else None,
-                pixel_mask=pixel_mask[:, i, :, :] if pixel_mask is not None else None,
+                pixel_values=pixel_values[:, idx, :, :, :] if pixel_values is not None else None,
+                pixel_mask=pixel_mask[:, idx, :, :] if pixel_mask is not None else None,
                 head_mask=head_mask,
                 inputs_embeds=inputs_embeds,
-                vision_embeds=vision_embeds[:, i, :, :] if vision_embeds is not None else None,
-                image_token_type_idx=i + 1,
+                vision_embeds=vision_embeds[:, idx, :, :] if vision_embeds is not None else None,
+                image_token_type_idx=idx + 1,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
@@ -1461,12 +1487,12 @@ class ViltForTokenClassification(ViltPreTrainedModel):
             return_dict=return_dict,
         )
 
-        sequence_output = outputs[0]
+        last_hidden_state = outputs[0]
 
         text_input_size = input_ids.shape[1] if input_ids is not None else inputs_embeds.shape[1]
 
-        sequence_output = self.dropout(sequence_output)
-        logits = self.classifier(sequence_output[:, :text_input_size])
+        last_hidden_state = self.dropout(last_hidden_state)
+        logits = self.classifier(last_hidden_state[:, :text_input_size])
 
         loss = None
         if labels is not None:

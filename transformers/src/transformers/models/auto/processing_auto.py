@@ -45,6 +45,10 @@ logger = logging.get_logger(__name__)
 
 PROCESSOR_MAPPING_NAMES = OrderedDict(
     [
+        # 前处理映射
+        ("florence2", "Florence2Processor"),
+        
+        
         ("align", "AlignProcessor"),
         ("altclip", "AltCLIPProcessor"),
         ("bark", "BarkProcessor"),

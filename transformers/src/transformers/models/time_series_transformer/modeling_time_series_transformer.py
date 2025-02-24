@@ -145,14 +145,14 @@ class TimeSeriesMeanScaler(nn.Module):
         ts_sum = (data * observed_indicator).abs().sum(self.dim, keepdim=True)
         num_observed = observed_indicator.sum(self.dim, keepdim=True)
 
-        scale = ts_sum / torch.clamp(num_observed, min=1)
+        scale = ts_sum / torch.clamp(num_observed, min=1) #逐批均值
 
         # If `default_scale` is provided, we use it, otherwise we use the scale
         # of the batch.
         if self.default_scale is None:
             batch_sum = ts_sum.sum(dim=0)
             batch_observations = torch.clamp(num_observed.sum(0), min=1)
-            default_scale = torch.squeeze(batch_sum / batch_observations)
+            default_scale = torch.squeeze(batch_sum / batch_observations) #总批均值
         else:
             default_scale = self.default_scale * torch.ones_like(scale)
 
@@ -1248,7 +1248,7 @@ class TimeSeriesTransformerModel(TimeSeriesTransformerPreTrainedModel):
         future_time_features: Optional[torch.Tensor] = None,
     ):
         # time feature
-        time_feat = (
+        time_feat = ( #过去和现在的拼接torch.Size([64, 48, 2])
             torch.cat(
                 (
                     past_time_features[:, self._past_length - self.config.context_length :, ...],
@@ -1264,20 +1264,20 @@ class TimeSeriesTransformerModel(TimeSeriesTransformerPreTrainedModel):
         if past_observed_mask is None:
             past_observed_mask = torch.ones_like(past_values)
 
-        context = past_values[:, -self.config.context_length :]
-        observed_context = past_observed_mask[:, -self.config.context_length :]
-        _, loc, scale = self.scaler(context, observed_context)
+        context = past_values[:, -self.config.context_length :] #上下文长度
+        observed_context = past_observed_mask[:, -self.config.context_length :]  #上下文长度掩膜
+        _, loc, scale = self.scaler(context, observed_context) #torch.Size([64, 1]) 0 torch.Size([64, 1]) 逐批均值
 
         inputs = (
             (torch.cat((past_values, future_values), dim=1) - loc) / scale
             if future_values is not None
             else (past_values - loc) / scale
-        )
+        ) #总的序列 torch.Size([64, 85])
 
         # static features
-        log_abs_loc = loc.abs().log1p() if self.config.input_size == 1 else loc.squeeze(1).abs().log1p()
-        log_scale = scale.log() if self.config.input_size == 1 else scale.squeeze(1).log()
-        static_feat = torch.cat((log_abs_loc, log_scale), dim=1)
+        log_abs_loc = loc.abs().log1p() if self.config.input_size == 1 else loc.squeeze(1).abs().log1p() #偏差
+        log_scale = scale.log() if self.config.input_size == 1 else scale.squeeze(1).log() #整体均值
+        static_feat = torch.cat((log_abs_loc, log_scale), dim=1) #orch.Size([64, 2]) 2包括偏差和整体均值
 
         if static_real_features is not None:
             static_feat = torch.cat((static_real_features, static_feat), dim=1)
@@ -1287,15 +1287,15 @@ class TimeSeriesTransformerModel(TimeSeriesTransformerPreTrainedModel):
         expanded_static_feat = static_feat.unsqueeze(1).expand(-1, time_feat.shape[1], -1)
 
         # all features
-        features = torch.cat((expanded_static_feat, time_feat), dim=-1)
+        features = torch.cat((expanded_static_feat, time_feat), dim=-1) #torch.Size([64, 48, 11])
 
         # lagged features
-        subsequences_length = (
+        subsequences_length = ( #48
             self.config.context_length + self.config.prediction_length
             if future_values is not None
             else self.config.context_length
         )
-        lagged_sequence = self.get_lagged_subsequences(sequence=inputs, subsequences_length=subsequences_length)
+        lagged_sequence = self.get_lagged_subsequences(sequence=inputs, subsequences_length=subsequences_length) #torch.Size([64, 85]) torch.Size([64, 48, 16])
         lags_shape = lagged_sequence.shape
         reshaped_lagged_sequence = lagged_sequence.reshape(lags_shape[0], lags_shape[1], -1)
 
@@ -1307,7 +1307,7 @@ class TimeSeriesTransformerModel(TimeSeriesTransformerPreTrainedModel):
         # transformer inputs
         transformer_inputs = torch.cat((reshaped_lagged_sequence, features), dim=-1)
 
-        return transformer_inputs, loc, scale, static_feat
+        return transformer_inputs, loc, scale, static_feat #torch.Size([64, 1]) torch.Size([64, 1])
 
     def get_encoder(self):
         return self.encoder
@@ -1315,6 +1315,14 @@ class TimeSeriesTransformerModel(TimeSeriesTransformerPreTrainedModel):
     def get_decoder(self):
         return self.decoder
 
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict, use_cache):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        use_cache = use_cache or self.config.use_cache
+        return output_attentions, output_hidden_states, return_dict, use_cache
+    
     @add_start_docstrings_to_model_forward(TIME_SERIES_TRANSFORMER_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=Seq2SeqTSModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -1368,21 +1376,16 @@ class TimeSeriesTransformerModel(TimeSeriesTransformerPreTrainedModel):
 
         >>> last_hidden_state = outputs.last_hidden_state
         ```"""
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict, use_cache = self._handle_params(output_attentions, output_hidden_states, return_dict,use_cache)
 
         transformer_inputs, loc, scale, static_feat = self.create_network_inputs(
-            past_values=past_values,
-            past_time_features=past_time_features,
-            past_observed_mask=past_observed_mask,
-            static_categorical_features=static_categorical_features,
-            static_real_features=static_real_features,
-            future_values=future_values,
-            future_time_features=future_time_features,
+            past_values=past_values, #torch.Size([64, 61])
+            past_time_features=past_time_features, #torch.Size([64, 61, 2])
+            past_observed_mask=past_observed_mask, #torch.Size([64, 61])
+            static_categorical_features=static_categorical_features, #torch.Size([64, 1])
+            static_real_features=static_real_features, #torch.Size([64, 1])
+            future_values=future_values, #torch.Size([64, 24])
+            future_time_features=future_time_features, #torch.Size([64, 24, 2])
         )
 
         if encoder_outputs is None:

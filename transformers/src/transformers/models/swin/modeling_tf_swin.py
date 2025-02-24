@@ -948,10 +948,10 @@ class TFSwinStage(keras.layers.Layer):
         training: bool = False,
     ) -> Tuple[tf.Tensor, ...]:
         height, width = input_dimensions
-        for i, layer_module in enumerate(self.blocks):
+        for i, layer_i in enumerate(self.blocks):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
-            layer_outputs = layer_module(
+            layer_outputs = layer_i(
                 hidden_states, input_dimensions, layer_head_mask, output_attentions, training=training
             )
 
@@ -1028,10 +1028,10 @@ class TFSwinEncoder(keras.layers.Layer):
             all_hidden_states += (hidden_states,)
             all_reshaped_hidden_states += (reshaped_hidden_state,)
 
-        for i, layer_module in enumerate(self.layers):
+        for i, layer_i in enumerate(self.layers):
             layer_head_mask = head_mask[i] if head_mask is not None else None
 
-            layer_outputs = layer_module(
+            layer_outputs = layer_i(
                 hidden_states, input_dimensions, layer_head_mask, output_attentions, training=training
             )
 

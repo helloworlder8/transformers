@@ -1,12 +1,7 @@
 # 维持外部接口一致，内部函数封装，逻辑更加简洁
 
-### 我们将Florence-2继承进transforms仓库
-
 #### 下载模型（手动）
 huggingface-cli download --resume-download microsoft/Florence-2-base --local-dir microsoft/Florence-2-base --local-dir-use-symlinks False --resume-download
 
 #### 下载模型（自动）
 export HF_ENDPOINT="https://hf-mirror.com"
-
-
-![alt text](demo/BEIT2.png)

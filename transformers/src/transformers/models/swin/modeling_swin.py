@@ -217,8 +217,8 @@ def window_partition(input_feature, window_size):
     input_feature = input_feature.view(
         batch_size, height // window_size, window_size, width // window_size, window_size, num_channels
     )
-    windows = input_feature.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, num_channels)
-    return windows
+    windows = input_feature.permute(0, 1, 3, 2, 4, 5).contiguous().view(-1, window_size, window_size, num_channels) #torch.Size([1, 8, 7, 8, 7, 96])
+    return windows #torch.Size([64, 7, 7, 96]) num_window window_size
 
 
 def window_reverse(windows, window_size, height, width):
@@ -297,14 +297,14 @@ class SwinEmbeddings(nn.Module):
 
     def forward(
         self,
-        pixel_values: Optional[torch.FloatTensor],
-        bool_masked_pos: Optional[torch.BoolTensor] = None,
-        interpolate_pos_encoding: bool = False,
+        pixel_values: Optional[torch.FloatTensor], #torch.Size([1, 3, 224, 224])
+        bool_masked_pos: Optional[torch.BoolTensor] = None, #None
+        interpolate_pos_encoding: bool = False, #false
     ) -> Tuple[torch.Tensor]:
         _, num_channels, height, width = pixel_values.shape
-        embeddings, output_dimensions = self.patch_embeddings(pixel_values)
+        embeddings, output_dimensions = self.patch_embeddings(pixel_values) #torch.Size([1, 3136, 96]) #(56, 56)
         embeddings = self.norm(embeddings)
-        batch_size, seq_len, _ = embeddings.size()
+        batch_size, seq_len, _ = embeddings.size() #1 3136
 
         if bool_masked_pos is not None:
             mask_tokens = self.mask_token.expand(batch_size, seq_len, -1)
@@ -357,11 +357,11 @@ class SwinPatchEmbeddings(nn.Module):
     def forward(self, pixel_values: Optional[torch.FloatTensor]) -> Tuple[torch.Tensor, Tuple[int]]:
         _, num_channels, height, width = pixel_values.shape
         # pad the input to be divisible by self.patch_size, if needed
-        pixel_values = self.maybe_pad(pixel_values, height, width)
-        embeddings = self.projection(pixel_values)
+        pixel_values = self.maybe_pad(pixel_values, height, width) #torch.Size([1, 3, 224, 224])
+        embeddings = self.projection(pixel_values) #torch.Size([1, 96, 56, 56]) batch D num_patch num_patch
         _, _, height, width = embeddings.shape
         output_dimensions = (height, width)
-        embeddings = embeddings.flatten(2).transpose(1, 2)
+        embeddings = embeddings.flatten(2).transpose(1, 2) #torch.Size([1, 3136, 96]) batch token D
 
         return embeddings, output_dimensions
 
@@ -648,7 +648,7 @@ class SwinLayer(nn.Module):
         self.intermediate = SwinIntermediate(config, dim)
         self.output = SwinOutput(config, dim)
 
-    def set_shift_and_window_size(self, input_resolution):
+    def set_shift_and_window_size(self, input_resolution): #(56, 56)
         if min(input_resolution) <= self.window_size:
             # if window size is larger than input resolution, we don't partition windows
             self.shift_size = torch_int(0)
@@ -700,12 +700,12 @@ class SwinLayer(nn.Module):
         always_partition: Optional[bool] = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         if not always_partition:
-            self.set_shift_and_window_size(input_dimensions)
+            self.set_shift_and_window_size(input_dimensions) #(56, 56)
         else:
             pass
         height, width = input_dimensions
         batch_size, _, channels = hidden_states.size()
-        shortcut = hidden_states
+        residual = hidden_states
 
         hidden_states = self.layernorm_before(hidden_states)
 
@@ -714,7 +714,7 @@ class SwinLayer(nn.Module):
         # pad hidden_states to multiples of window size
         hidden_states, pad_values = self.maybe_pad(hidden_states, height, width)
 
-        _, height_pad, width_pad, _ = hidden_states.shape
+        _, pad_height, pad_width, _ = hidden_states.shape
         # cyclic shift
         if self.shift_size > 0:
             shifted_hidden_states = torch.roll(hidden_states, shifts=(-self.shift_size, -self.shift_size), dims=(1, 2))
@@ -723,9 +723,9 @@ class SwinLayer(nn.Module):
 
         # partition windows
         hidden_states_windows = window_partition(shifted_hidden_states, self.window_size)
-        hidden_states_windows = hidden_states_windows.view(-1, self.window_size * self.window_size, channels)
+        hidden_states_windows = hidden_states_windows.view(-1, self.window_size * self.window_size, channels) #torch.Size([64, 49, 96])
         attn_mask = self.get_attn_mask(
-            height_pad, width_pad, dtype=hidden_states.dtype, device=hidden_states_windows.device
+            pad_height, pad_width, dtype=hidden_states.dtype, device=hidden_states_windows.device
         )
 
         attention_outputs = self.attention(
@@ -734,8 +734,8 @@ class SwinLayer(nn.Module):
 
         attention_output = attention_outputs[0]
 
-        attention_windows = attention_output.view(-1, self.window_size, self.window_size, channels)
-        shifted_windows = window_reverse(attention_windows, self.window_size, height_pad, width_pad)
+        attention_windows = attention_output.view(-1, self.window_size, self.window_size, channels) #->torch.Size([64, 49, 96])
+        shifted_windows = window_reverse(attention_windows, self.window_size, pad_height, pad_width) #->torch.Size([1, 56, 56, 96])
 
         # reverse cyclic shift
         if self.shift_size > 0:
@@ -749,7 +749,7 @@ class SwinLayer(nn.Module):
 
         attention_windows = attention_windows.view(batch_size, height * width, channels)
 
-        hidden_states = shortcut + self.drop_path(attention_windows)
+        hidden_states = residual + self.drop_path(attention_windows)
 
         layer_output = self.layernorm_after(hidden_states)
         layer_output = self.intermediate(layer_output)
@@ -794,15 +794,15 @@ class SwinStage(nn.Module):
         output_attentions: Optional[bool] = False,
         always_partition: Optional[bool] = False,
     ) -> Tuple[torch.Tensor]:
-        height, width = input_dimensions
-        for i, layer_module in enumerate(self.blocks):
-            layer_head_mask = head_mask[i] if head_mask is not None else None
+        height, width = input_dimensions #(56, 56)
+        for idx, block_i in enumerate(self.blocks):
+            layer_head_mask = head_mask[idx] if head_mask is not None else None
 
-            layer_outputs = layer_module(
+            block_outputs = block_i(
                 hidden_states, input_dimensions, layer_head_mask, output_attentions, always_partition
             )
 
-            hidden_states = layer_outputs[0]
+            hidden_states = block_outputs[0]
 
         hidden_states_before_downsampling = hidden_states
         if self.downsample is not None:
@@ -815,7 +815,7 @@ class SwinStage(nn.Module):
         stage_outputs = (hidden_states, hidden_states_before_downsampling, output_dimensions)
 
         if output_attentions:
-            stage_outputs += layer_outputs[1:]
+            stage_outputs += block_outputs[1:]
         return stage_outputs
 
 
@@ -865,12 +865,12 @@ class SwinEncoder(nn.Module):
             all_hidden_states += (hidden_states,)
             all_reshaped_hidden_states += (reshaped_hidden_state,)
 
-        for i, layer_module in enumerate(self.layers):
-            layer_head_mask = head_mask[i] if head_mask is not None else None
+        for idx, layer_i in enumerate(self.layers):
+            layer_head_mask = head_mask[idx] if head_mask is not None else None
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+                    layer_i.__call__,
                     hidden_states,
                     input_dimensions,
                     layer_head_mask,
@@ -878,7 +878,7 @@ class SwinEncoder(nn.Module):
                     always_partition,
                 )
             else:
-                layer_outputs = layer_module(
+                layer_outputs = layer_i(
                     hidden_states, input_dimensions, layer_head_mask, output_attentions, always_partition
                 )
 
@@ -1017,6 +1017,15 @@ class SwinModel(SwinPreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.encoder.layer[layer].attention.prune_heads(heads)
 
+
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
+    
     @add_start_docstrings_to_model_forward(SWIN_INPUTS_DOCSTRING)
     @add_code_sample_docstrings(
         checkpoint=_CHECKPOINT_FOR_DOC,
@@ -1039,28 +1048,20 @@ class SwinModel(SwinPreTrainedModel):
         bool_masked_pos (`torch.BoolTensor` of shape `(batch_size, num_patches)`, *optional*):
             Boolean masked positions. Indicates which patches are masked (1) and which aren't (0).
         """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
+        
+        
         if pixel_values is None:
             raise ValueError("You have to specify pixel_values")
 
-        # Prepare head mask if needed
-        # 1.0 in head_mask indicate we keep the head
-        # attention_probs has shape bsz x n_heads x N x N
-        # input head_mask has shape [num_heads] or [num_hidden_layers x num_heads]
-        # and head_mask is converted to shape [num_hidden_layers x batch x num_heads x seq_length x seq_length]
-        head_mask = self.get_head_mask(head_mask, len(self.config.depths))
+        head_mask = self.get_head_mask(head_mask, len(self.config.depths)) #[None, None, None, None]
 
-        embedding_output, input_dimensions = self.embeddings(
+        hidden_states, input_dimensions = self.embeddings(
             pixel_values, bool_masked_pos=bool_masked_pos, interpolate_pos_encoding=interpolate_pos_encoding
-        )
+        ) #torch.Size([1, 3, 224, 224]) none false
 
         encoder_outputs = self.encoder(
-            embedding_output,
+            hidden_states,
             input_dimensions,
             head_mask=head_mask,
             output_attentions=output_attentions,
@@ -1238,8 +1239,15 @@ class SwinForImageClassification(SwinPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
-    @add_start_docstrings_to_model_forward(SWIN_INPUTS_DOCSTRING)
-    @add_code_sample_docstrings(
+
+    # 本来就有或者从配置中取出
+    def _handle_params(self,return_dict):
+        return_dict = return_dict or self.config.use_return_dict
+        return return_dict
+    
+    
+    @add_start_docstrings_to_model_forward(SWIN_INPUTS_DOCSTRING) #模型前向传播的开始文档
+    @add_code_sample_docstrings( #示例代码
         checkpoint=_IMAGE_CLASS_CHECKPOINT,
         output_type=SwinImageClassifierOutput,
         config_class=_CONFIG_FOR_DOC,
@@ -1261,15 +1269,15 @@ class SwinForImageClassification(SwinPreTrainedModel):
             config.num_labels - 1]`. If `config.num_labels == 1` a regression loss is computed (Mean-Square loss), If
             `config.num_labels > 1` a classification loss is computed (Cross-Entropy).
         """
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = self._handle_params( return_dict)
 
         outputs = self.swin(
-            pixel_values,
-            head_mask=head_mask,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            interpolate_pos_encoding=interpolate_pos_encoding,
-            return_dict=return_dict,
+            pixel_values, #torch.Size([1, 3, 224, 224])
+            head_mask=head_mask, #None
+            interpolate_pos_encoding=interpolate_pos_encoding, #false
+            output_attentions=output_attentions, #none
+            output_hidden_states=output_hidden_states, #none
+            return_dict=return_dict, #true
         )
 
         pooled_output = outputs[1]

@@ -312,7 +312,7 @@ class BeitImageProcessor(BaseImageProcessor):
         return super().__call__(images, segmentation_maps=segmentation_maps, **kwargs)
 
     @deprecate_kwarg("reduce_labels", new_name="do_reduce_labels", version="4.41.0")
-    @filter_out_non_signature_kwargs()
+    @filter_out_non_signature_kwargs() #在运行这个之前要运行前两个装饰器
     def preprocess(
         self,
         images: ImageInput,
@@ -332,61 +332,7 @@ class BeitImageProcessor(BaseImageProcessor):
         data_format: ChannelDimension = ChannelDimension.FIRST,
         input_data_format: Optional[Union[str, ChannelDimension]] = None,
     ) -> PIL.Image.Image:
-        """
-        Preprocess an image or batch of images.
-
-        Args:
-            images (`ImageInput`):
-                Image to preprocess. Expects a single or batch of images with pixel values ranging from 0 to 255. If
-                passing in images with pixel values between 0 and 1, set `do_rescale=False`.
-            segmentation_maps (`ImageInput`, *optional*)
-                Segmentation maps to preprocess. Expects a single or batch of images with pixel values ranging from 0 to 255. If
-                passing in images with pixel values between 0 and 1, set `do_rescale=False`.
-            do_resize (`bool`, *optional*, defaults to `self.do_resize`):
-                Whether to resize the image.
-            size (`Dict[str, int]`, *optional*, defaults to `self.size`):
-                Size of the image after resizing.
-            resample (`int`, *optional*, defaults to `self.resample`):
-                Resampling filter to use if resizing the image. This can be one of the enum `PILImageResampling`, Only
-                has an effect if `do_resize` is set to `True`.
-            do_center_crop (`bool`, *optional*, defaults to `self.do_center_crop`):
-                Whether to center crop the image.
-            crop_size (`Dict[str, int]`, *optional*, defaults to `self.crop_size`):
-                Size of the image after center crop. If one edge the image is smaller than `crop_size`, it will be
-                padded with zeros and then cropped
-            do_rescale (`bool`, *optional*, defaults to `self.do_rescale`):
-                Whether to rescale the image values between [0 - 1].
-            rescale_factor (`float`, *optional*, defaults to `self.rescale_factor`):
-                Rescale factor to rescale the image by if `do_rescale` is set to `True`.
-            do_normalize (`bool`, *optional*, defaults to `self.do_normalize`):
-                Whether to normalize the image.
-            image_mean (`float` or `List[float]`, *optional*, defaults to `self.image_mean`):
-                Image mean.
-            image_std (`float` or `List[float]`, *optional*, defaults to `self.image_std`):
-                Image standard deviation.
-            do_reduce_labels (`bool`, *optional*, defaults to `self.do_reduce_labels`):
-                Whether or not to reduce all label values of segmentation maps by 1. Usually used for datasets where 0
-                is used for background, and background itself is not included in all classes of a dataset (e.g.
-                ADE20k). The background label will be replaced by 255.
-            return_tensors (`str` or `TensorType`, *optional*):
-                The type of tensors to return. Can be one of:
-                    - Unset: Return a list of `np.ndarray`.
-                    - `TensorType.TENSORFLOW` or `'tf'`: Return a batch of type `tf.Tensor`.
-                    - `TensorType.PYTORCH` or `'pt'`: Return a batch of type `torch.Tensor`.
-                    - `TensorType.NUMPY` or `'np'`: Return a batch of type `np.ndarray`.
-                    - `TensorType.JAX` or `'jax'`: Return a batch of type `jax.numpy.ndarray`.
-            data_format (`ChannelDimension` or `str`, *optional*, defaults to `ChannelDimension.FIRST`):
-                The channel dimension format for the output image. Can be one of:
-                - `"channels_first"` or `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
-                - `"channels_last"` or `ChannelDimension.LAST`: image in (height, width, num_channels) format.
-                - Unset: Use the channel dimension format of the input image.
-            input_data_format (`ChannelDimension` or `str`, *optional*):
-                The channel dimension format for the input image. If unset, the channel dimension format is inferred
-                from the input image. Can be one of:
-                - `"channels_first"` or `ChannelDimension.FIRST`: image in (num_channels, height, width) format.
-                - `"channels_last"` or `ChannelDimension.LAST`: image in (height, width, num_channels) format.
-                - `"none"` or `ChannelDimension.NONE`: image in (height, width) format.
-        """
+        """ 这一部分都是图像处理的常规操作 """
         do_resize = do_resize if do_resize is not None else self.do_resize
         size = size if size is not None else self.size
         size = get_size_dict(size, default_to_square=True, param_name="size")
@@ -401,11 +347,11 @@ class BeitImageProcessor(BaseImageProcessor):
         image_std = image_std if image_std is not None else self.image_std
         do_reduce_labels = do_reduce_labels if do_reduce_labels is not None else self.do_reduce_labels
 
-        images = make_list_of_images(images)
+        images = make_list_of_images(images) #[<PIL.JpegImagePlugin.JpegImageFile image mode=RGB size=640x480 at 0x7FB0D0B67640>]
 
         if segmentation_maps is not None:
             segmentation_maps = make_list_of_images(segmentation_maps, expected_ndims=2)
-
+        """ 特殊参数异常处理 """
         if segmentation_maps is not None and not valid_images(segmentation_maps):
             raise ValueError(
                 "Invalid segmentation_maps type. Must be of type PIL.Image.Image, numpy.ndarray, "
@@ -416,7 +362,7 @@ class BeitImageProcessor(BaseImageProcessor):
                 "Invalid image type. Must be of type PIL.Image.Image, numpy.ndarray, "
                 "torch.Tensor, tf.Tensor or jax.ndarray."
             )
-
+        """ 常规参数异常处理 """
         validate_preprocess_arguments(
             do_rescale=do_rescale,
             rescale_factor=rescale_factor,
@@ -429,7 +375,7 @@ class BeitImageProcessor(BaseImageProcessor):
             size=size,
             resample=resample,
         )
-
+        """ 类似于数据加强操作 """
         images = [
             self._preprocess_image(
                 image=img,
@@ -464,8 +410,8 @@ class BeitImageProcessor(BaseImageProcessor):
                 )
                 for segmentation_map in segmentation_maps
             ]
-            data["labels"] = segmentation_maps
-
+            data["labels"] = segmentation_maps #数据中可能还会涉及到标签处理
+        """ 常规处理 """
         return BatchFeature(data=data, tensor_type=return_tensors)
 
     def post_process_semantic_segmentation(self, outputs, target_sizes: List[Tuple] = None):

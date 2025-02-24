@@ -12,7 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# 加入所有的文件夹
 from . import (
+    florence2,
+    
     albert,
     align,
     altclip,

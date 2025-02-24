@@ -8,10 +8,9 @@ __pycache__/
 # C extensions
 *.so
 
-demo/transformers-code/
 hub/
 hub_pull/
-
+microsoft/
 
 # tests and logs
 tests/fixtures/cached_*_text.txt

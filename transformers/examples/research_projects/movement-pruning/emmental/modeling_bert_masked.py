@@ -338,11 +338,11 @@ class BertEncoder(nn.Module):
     ):
         all_hidden_states = ()
         all_attentions = ()
-        for i, layer_module in enumerate(self.layer):
+        for i, layer_i in enumerate(self.layer):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_outputs = layer_module(
+            layer_outputs = layer_i(
                 hidden_states,
                 attention_mask,
                 head_mask[i],
@@ -376,8 +376,8 @@ class BertPooler(nn.Module):
     def forward(self, hidden_states):
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
-        first_token_tensor = hidden_states[:, 0]
-        pooled_output = self.dense(first_token_tensor)
+        first_token = hidden_states[:, 0]
+        pooled_output = self.dense(first_token)
         pooled_output = self.activation(pooled_output)
         return pooled_output
 

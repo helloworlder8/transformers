@@ -158,6 +158,12 @@ _import_structure = {
     ],
     # Models
     "models": [],
+    
+    "models.florence2": [
+        "Florence2Config",
+        "Florence2Processor",
+    ],
+    
     "models.albert": ["AlbertConfig"],
     "models.align": [
         "AlignConfig",
@@ -1372,6 +1378,15 @@ else:
 
     # PyTorch models structure
 
+    # 导入模型
+    _import_structure["models.florence2"].extend(
+        [
+            "Florence2ForConditionalGeneration ",
+            # "GroundingDinoModel",
+            # "GroundingDinoPreTrainedModel",
+        ]
+    )
+    
     _import_structure["models.albert"].extend(
         [
             "AlbertForMaskedLM",
@@ -5009,6 +5024,11 @@ if TYPE_CHECKING:
         load_tf2_model_in_pytorch_model,
         load_tf2_weights_in_pytorch_model,
     )
+    # 导入配置
+    # "models.florence2": ["Florence2Config"],
+    from .models.florence2 import Florence2Config
+    
+    
     from .models.albert import AlbertConfig
     from .models.align import (
         AlignConfig,
@@ -6290,6 +6310,9 @@ if TYPE_CHECKING:
         )
         from .modeling_rope_utils import ROPE_INIT_FUNCTIONS
         from .modeling_utils import PreTrainedModel
+        # 导入模型
+        from .models.florence2 import Florence2ForConditionalGeneration
+        
         from .models.albert import (
             AlbertForMaskedLM,
             AlbertForMultipleChoice,

@@ -414,13 +414,13 @@ class AutoformerSeriesDecompositionLayer(nn.Module):
         self.kernel_size = config.moving_average
         self.avg = nn.AvgPool1d(kernel_size=self.kernel_size, stride=1, padding=0)
 
-    def forward(self, x):
+    def forward(self, x): #torch.Size([64, 24, 16])
         """Input shape: Batch x Time x EMBED_DIM"""
         # padding on the both ends of time series
         num_of_pads = (self.kernel_size - 1) // 2
-        front = x[:, 0:1, :].repeat(1, num_of_pads, 1)
-        end = x[:, -1:, :].repeat(1, num_of_pads, 1)
-        x_padded = torch.cat([front, x, end], dim=1)
+        front = x[:, 0:1, :].repeat(1, num_of_pads, 1) #-> torch.Size([64, 12, 16])
+        end = x[:, -1:, :].repeat(1, num_of_pads, 1)  #-> torch.Size([64, 12, 16])
+        x_padded = torch.cat([front, x, end], dim=1) #->torch.Size([64, 48, 16])
 
         # calculate the trend and seasonal part of the series
         x_trend = self.avg(x_padded.permute(0, 2, 1)).permute(0, 2, 1)
@@ -1088,6 +1088,13 @@ class AutoformerEncoder(AutoformerPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
     def forward(
         self,
         attention_mask: Optional[torch.Tensor] = None,
@@ -1125,14 +1132,10 @@ class AutoformerEncoder(AutoformerPreTrainedModel):
             return_dict (`bool`, *optional*):
                 Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
         """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
 
-        hidden_states = self.value_embedding(inputs_embeds)
-        embed_pos = self.embed_positions(inputs_embeds.size())
+        hidden_states = self.value_embedding(inputs_embeds) #torch.Size([64, 24, 22])-> torch.Size([64, 24, 64]) batch seq_len dim
+        embed_pos = self.embed_positions(inputs_embeds.size()) #torch.Size([24, 64])
 
         hidden_states = self.layernorm_embedding(hidden_states + embed_pos)
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
@@ -1494,13 +1497,13 @@ class AutoformerModel(AutoformerPreTrainedModel):
 
     def create_network_inputs(
         self,
-        past_values: torch.Tensor,
-        past_time_features: torch.Tensor,
-        static_categorical_features: Optional[torch.Tensor] = None,
-        static_real_features: Optional[torch.Tensor] = None,
-        past_observed_mask: Optional[torch.Tensor] = None,
-        future_values: Optional[torch.Tensor] = None,
-        future_time_features: Optional[torch.Tensor] = None,
+        past_values: torch.Tensor, #torch.Size([64, 61]) 包含历史数据的张量    批次 时间步长度
+        past_time_features: torch.Tensor, #torch.Size([64, 61, 2]) 历史数据对应的时间特征张量 batch time feature
+        past_observed_mask: Optional[torch.Tensor] = None, #torch.Size([64, 61]) 观察掩码 每个时间步的观察状态。如果某个时间步的值被观测到，掩码值为 1，否则为 0
+        static_categorical_features: Optional[torch.Tensor] = None, #torch.Size([64, 1]) 静态的分类特征张量，表示每个样本的一个分类特征。64 是批次大小，而 1 表示每个样本只有一个分类特征。
+        static_real_features: Optional[torch.Tensor] = None, #None 静态的实数特征，可能为空（None）。如果存在，它通常包含每个样本的某些固定值（如用户的年龄、性别等），但在这个示例中没有提供该特征。
+        future_values: Optional[torch.Tensor] = None, #torch.Size([64, 24]) 包含未来值的张量。64 是批次大小，24 是预测的时间步数，即对于每个样本，模型需要预测未来 24 个时间步的数据。
+        future_time_features: Optional[torch.Tensor] = None, #torch.Size([64, 24, 2]) 未来值对应的时间特征张量。64 是批次大小，24 是未来时间步数，2 是每个未来时间步的时间特征数量（例如，未来每个时间点可能包含的季节性或周期性特征）。
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Creates the inputs for the network given the past and future values, time features, and static features.
@@ -1534,12 +1537,12 @@ class AutoformerModel(AutoformerPreTrainedModel):
             - static_feat (`torch.Tensor`): A tensor of shape `(batch_size, num_static_features)` containing the
               concatenated static features.
         """
-        # time feature
-        time_feat = (
+        """ 1. 创建时间特征 (time_feat) """
+        time_feat = ( #torch.Size([64, 48, 2])
             torch.cat(
                 (
-                    past_time_features[:, self._past_length - self.config.context_length :, ...],
-                    future_time_features,
+                    past_time_features[:, self._past_length - self.config.context_length :, ...], #torch.Size([64, 24, 2])
+                    future_time_features, #torch.Size([64, 24, 2])
                 ),
                 dim=1,
             )
@@ -1547,36 +1550,36 @@ class AutoformerModel(AutoformerPreTrainedModel):
             else past_time_features[:, self._past_length - self.config.context_length :, ...]
         )
 
-        # target
-        if past_observed_mask is None:
+        """ 2. 处理观察掩码 """
+        if past_observed_mask is None: #torch.Size([64, 61])
             past_observed_mask = torch.ones_like(past_values)
-
-        context = past_values[:, -self.config.context_length :]
-        observed_context = past_observed_mask[:, -self.config.context_length :]
+        """ 上下文数据与归一化 """
+        context = past_values[:, -self.config.context_length :] #torch.Size([64, 24])
+        observed_context = past_observed_mask[:, -self.config.context_length :] #torch.Size([64, 24])
         _, loc, scale = self.scaler(context, observed_context)
 
-        inputs = (
+        inputs = ( #torch.Size([64, 85])
             (torch.cat((past_values, future_values), dim=1) - loc) / scale
             if future_values is not None
             else (past_values - loc) / scale
         )
 
-        # static features
-        log_abs_loc = loc.abs().log1p() if self.config.input_size == 1 else loc.squeeze(1).abs().log1p()
+        """ 5. 静态特征 """
+        log_abs_loc = loc.abs().log1p() if self.config.input_size == 1 else loc.squeeze(1).abs().log1p() #torch.Size([64, 1])
         log_scale = scale.log() if self.config.input_size == 1 else scale.squeeze(1).log()
         static_feat = torch.cat((log_abs_loc, log_scale), dim=1)
-
+        """  """
         if static_real_features is not None:
             static_feat = torch.cat((static_real_features, static_feat), dim=1)
         if static_categorical_features is not None:
             embedded_cat = self.embedder(static_categorical_features)
-            static_feat = torch.cat((embedded_cat, static_feat), dim=1)
+            static_feat = torch.cat((embedded_cat, static_feat), dim=1) #torch.Size([64, 4])
         expanded_static_feat = static_feat.unsqueeze(1).expand(-1, time_feat.shape[1], -1)
 
-        # all features
-        features = torch.cat((expanded_static_feat, time_feat), dim=-1)
+        """ 6. 合并时间特征与静态特征 """
+        features = torch.cat((expanded_static_feat, time_feat), dim=-1) #torch.Size([64, 48, 6])
 
-        # lagged features
+        """ 7. 生成滞后特征 (lagged_sequence) """
         subsequences_length = (
             self.config.context_length + self.config.prediction_length
             if future_values is not None
@@ -1584,20 +1587,29 @@ class AutoformerModel(AutoformerPreTrainedModel):
         )
         lagged_sequence = self.get_lagged_subsequences(sequence=inputs, subsequences_length=subsequences_length)
         lags_shape = lagged_sequence.shape
-        reshaped_lagged_sequence = lagged_sequence.reshape(lags_shape[0], lags_shape[1], -1)
+        reshaped_lagged_sequence = lagged_sequence.reshape(lags_shape[0], lags_shape[1], -1) #torch.Size([64, 48, 16])
 
         if reshaped_lagged_sequence.shape[1] != time_feat.shape[1]:
             raise ValueError(
                 f"input length {reshaped_lagged_sequence.shape[1]} and time feature lengths {time_feat.shape[1]} does not match"
             )
         return reshaped_lagged_sequence, features, loc, scale, static_feat
-
+        #     torch.Size([64, 48, 16]) torch.Size([64, 48, 16]) torch.Size([64, 1]) torch.Size([64, 1]) torch.Size([64, 4])
     def get_encoder(self):
         return self.encoder
 
     def get_decoder(self):
         return self.decoder
 
+
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict, use_cache):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        use_cache = use_cache or self.config.use_cache
+        return output_attentions, output_hidden_states, return_dict, use_cache
+    
     @add_start_docstrings_to_model_forward(AUTOFORMER_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=AutoformerModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -1650,25 +1662,21 @@ class AutoformerModel(AutoformerPreTrainedModel):
 
         >>> last_hidden_state = outputs.last_hidden_state
         ```"""
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict, use_cache = self._handle_params(output_attentions, output_hidden_states, return_dict,use_cache)
 
+        #     torch.Size([64, 48, 16]) torch.Size([64, 48, 6]) torch.Size([64, 1]) torch.Size([64, 1]) torch.Size([64, 4])
         transformer_inputs, temporal_features, loc, scale, static_feat = self.create_network_inputs(
-            past_values=past_values,
-            past_time_features=past_time_features,
-            past_observed_mask=past_observed_mask,
-            static_categorical_features=static_categorical_features,
-            static_real_features=static_real_features,
-            future_values=future_values,
-            future_time_features=future_time_features,
+            past_values=past_values, #torch.Size([64, 61])
+            past_time_features=past_time_features, #torch.Size([64, 61, 2])
+            past_observed_mask=past_observed_mask, #torch.Size([64, 61])
+            static_categorical_features=static_categorical_features, #torch.Size([64, 1])
+            static_real_features=static_real_features, #none
+            future_values=future_values, #torch.Size([64, 24])
+            future_time_features=future_time_features, #torch.Size([64, 24, 2])
         )
 
         if encoder_outputs is None:
-            enc_input = torch.cat(
+            enc_input = torch.cat( #torch.Size([64, 24, 22])
                 (
                     transformer_inputs[:, : self.config.context_length, ...],
                     temporal_features[:, : self.config.context_length, ...],
@@ -1676,7 +1684,7 @@ class AutoformerModel(AutoformerPreTrainedModel):
                 dim=-1,
             )
             encoder_outputs = self.encoder(
-                inputs_embeds=enc_input,
+                inputs_embeds=enc_input,  #torch.Size([64, 24, 22])
                 head_mask=head_mask,
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
@@ -1690,25 +1698,25 @@ class AutoformerModel(AutoformerPreTrainedModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
-        if future_values is not None:
+        if future_values is not None: #torch.Size([64, 24])
             # Decoder inputs
             # seasonality and trend from context length
             seasonal_input, trend_input = self.decomposition_layer(
                 transformer_inputs[:, : self.config.context_length, ...]
-            )
-            mean = (
+            ) #->torch.Size([64, 24, 16]) torch.Size([64, 24, 16])
+            mean = ( #在序列上取得平均
                 torch.mean(transformer_inputs[:, : self.config.context_length, ...], dim=1)
                 .unsqueeze(1)
                 .repeat(1, self.config.prediction_length, 1)
             )
-            zeros = torch.zeros(
+            zeros = torch.zeros( # torch.Size([64, 24, 16])
                 [transformer_inputs.shape[0], self.config.prediction_length, transformer_inputs.shape[2]],
                 device=enc_input.device,
             )
 
             decoder_input = torch.cat(
                 (
-                    torch.cat((seasonal_input[:, -self.config.label_length :, ...], zeros), dim=1),
+                    torch.cat((seasonal_input[:, -self.config.label_length :, ...], zeros), dim=1), #季节系输入加zero
                     temporal_features[:, self.config.context_length - self.config.label_length :, ...],
                 ),
                 dim=-1,
@@ -1716,10 +1724,10 @@ class AutoformerModel(AutoformerPreTrainedModel):
             trend_init = torch.cat(
                 (
                     torch.cat((trend_input[:, -self.config.label_length :, ...], mean), dim=1),
-                    temporal_features[:, self.config.context_length - self.config.label_length :, ...],
+                    temporal_features[:, self.config.context_length - self.config.label_length :, ...], #torch.size([64, 34, 6])
                 ),
                 dim=-1,
-            )
+            ) #torch.Size([64, 34, 22])
 
             decoder_outputs = self.decoder(
                 trend=trend_init,

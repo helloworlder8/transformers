@@ -139,15 +139,15 @@ class InformerMeanScaler(nn.Module):
                 (`(batch_size, sequence_length, num_input_channels)`,`(batch_size, 1, num_input_channels)`,
                 `(batch_size, 1, num_input_channels)`)
         """
-        ts_sum = (data * observed_indicator).abs().sum(self.dim, keepdim=True)
-        num_observed = observed_indicator.sum(self.dim, keepdim=True)
+        ts_sum = (data * observed_indicator).abs().sum(self.dim, keepdim=True) #观察到的值的总和 torch.Size([64, 1])
+        num_observed = observed_indicator.sum(self.dim, keepdim=True) #每个维度中观测到的有效数据点的数量 torch.Size([64, 1])
 
-        scale = ts_sum / torch.clamp(num_observed, min=1)
+        scale = ts_sum / torch.clamp(num_observed, min=1) #标准化数据 torch.Size([64, 1])
 
         # If `default_scale` is provided, we use it, otherwise we use the scale
         # of the batch.
         if self.default_scale is None:
-            batch_sum = ts_sum.sum(dim=0)
+            batch_sum = ts_sum.sum(dim=0) #所有值总和
             batch_observations = torch.clamp(num_observed.sum(0), min=1)
             default_scale = torch.squeeze(batch_sum / batch_observations)
         else:
@@ -157,13 +157,13 @@ class InformerMeanScaler(nn.Module):
         scale = torch.where(num_observed > 0, scale, default_scale)
 
         # ensure the scale is at least `self.minimum_scale`
-        scale = torch.clamp(scale, min=self.minimum_scale)
+        scale = torch.clamp(scale, min=self.minimum_scale) #torch.Size([64, 1])
         scaled_data = data / scale
 
         if not self.keepdim:
             scale = scale.squeeze(dim=self.dim)
 
-        return scaled_data, torch.zeros_like(scale), scale
+        return scaled_data, torch.zeros_like(scale), scale #类似批归一化  类似批归一化尺度
 
 
 # Copied from transformers.models.time_series_transformer.modeling_time_series_transformer.TimeSeriesNOPScaler with TimeSeriesTransformer->Informer,TimeSeries->Informer
@@ -1100,6 +1100,15 @@ class InformerEncoder(InformerPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
+    
     def forward(
         self,
         attention_mask: Optional[torch.Tensor] = None,
@@ -1137,14 +1146,10 @@ class InformerEncoder(InformerPreTrainedModel):
             return_dict (`bool`, *optional*):
                 Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
         """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
 
-        hidden_states = self.value_embedding(inputs_embeds)
-        embed_pos = self.embed_positions(inputs_embeds.size())
+        hidden_states = self.value_embedding(inputs_embeds) #torch.Size([64, 24, 23])-》torch.Size([64, 24, 32]) batch windows_size Dim
+        embed_pos = self.embed_positions(inputs_embeds.size()) #torch.Size([24, 32])
 
         hidden_states = self.layernorm_embedding(hidden_states + embed_pos)
         hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
@@ -1165,7 +1170,7 @@ class InformerEncoder(InformerPreTrainedModel):
                     f" {head_mask.size()[0]}."
                 )
 
-        for idx, (encoder_layer, conv_layer) in enumerate(zip(self.layers, self.conv_layers)):
+        for idx, (layer_i, conv_layer) in enumerate(zip(self.layers, self.conv_layers)):
             if output_hidden_states:
                 encoder_states = encoder_states + (hidden_states,)
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
@@ -1180,7 +1185,7 @@ class InformerEncoder(InformerPreTrainedModel):
             else:
                 if self.gradient_checkpointing and self.training:
                     layer_outputs = self._gradient_checkpointing_func(
-                        encoder_layer.__call__,
+                        layer_i.__call__,
                         hidden_states,
                         attention_mask,
                         (head_mask[idx] if head_mask is not None else None),
@@ -1190,17 +1195,17 @@ class InformerEncoder(InformerPreTrainedModel):
                         output = self._gradient_checkpointing_func(conv_layer, layer_outputs[0])
                         layer_outputs = (output,) + layer_outputs[1:]
                 else:
-                    layer_outputs = encoder_layer(
-                        hidden_states,
-                        attention_mask,
-                        layer_head_mask=(head_mask[idx] if head_mask is not None else None),
-                        output_attentions=output_attentions,
+                    layer_outputs = layer_i(
+                        hidden_states, #torch.Size([64, 24, 32]) batch windows_size Dim
+                        attention_mask, #none
+                        layer_head_mask=(head_mask[idx] if head_mask is not None else None), #none
+                        output_attentions=output_attentions, #False
                     )
                     if conv_layer is not None:
                         output = conv_layer(layer_outputs[0])
                         layer_outputs = (output,) + layer_outputs[1:]
 
-                hidden_states = layer_outputs[0]
+                hidden_states = layer_outputs[0] #torch.Size([64, 3, 32]) batch windows_size Dim
 
             if output_attentions:
                 all_attentions = all_attentions + (layer_outputs[1],)
@@ -1243,6 +1248,14 @@ class InformerDecoder(InformerPreTrainedModel):
         # Initialize weights and apply final processing
         self.post_init()
 
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict, use_cache):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        use_cache = use_cache or self.config.use_cache
+        return output_attentions, output_hidden_states, return_dict, use_cache
+    
     def forward(
         self,
         attention_mask: Optional[torch.Tensor] = None,
@@ -1257,78 +1270,17 @@ class InformerDecoder(InformerPreTrainedModel):
         output_hidden_states: Optional[bool] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, BaseModelOutputWithPastAndCrossAttentions]:
-        r"""
-        Args:
-            attention_mask (`torch.Tensor` of shape `(batch_size, sequence_length)`, *optional*):
-                Mask to avoid performing attention on padding token indices. Mask values selected in `[0, 1]`:
+        
+        output_attentions, output_hidden_states, return_dict, use_cache = self._handle_params(output_attentions, output_hidden_states, return_dict,use_cache)
 
-                - 1 for tokens that are **not masked**,
-                - 0 for tokens that are **masked**.
-
-                [What are attention masks?](../glossary#attention-mask)
-            encoder_hidden_states (`torch.FloatTensor` of shape `(batch_size, encoder_sequence_length, hidden_size)`, *optional*):
-                Sequence of hidden-states at the output of the last layer of the encoder. Used in the cross-attention
-                of the decoder.
-            encoder_attention_mask (`torch.LongTensor` of shape `(batch_size, encoder_sequence_length)`, *optional*):
-                Mask to avoid performing cross-attention on padding tokens indices of encoder input_ids. Mask values
-                selected in `[0, 1]`:
-
-                - 1 for tokens that are **not masked**,
-                - 0 for tokens that are **masked**.
-
-                [What are attention masks?](../glossary#attention-mask)
-            head_mask (`torch.Tensor` of shape `(decoder_layers, decoder_attention_heads)`, *optional*):
-                Mask to nullify selected heads of the attention modules. Mask values selected in `[0, 1]`:
-
-                - 1 indicates the head is **not masked**,
-                - 0 indicates the head is **masked**.
-
-            cross_attn_head_mask (`torch.Tensor` of shape `(decoder_layers, decoder_attention_heads)`, *optional*):
-                Mask to nullify selected heads of the cross-attention modules in the decoder to avoid performing
-                cross-attention on hidden heads. Mask values selected in `[0, 1]`:
-
-                - 1 indicates the head is **not masked**,
-                - 0 indicates the head is **masked**.
-
-            past_key_values (`tuple(tuple(torch.FloatTensor))`, *optional*, returned when `use_cache=True` is passed or when `config.use_cache=True`):
-                Tuple of `tuple(torch.FloatTensor)` of length `config.n_layers`, with each tuple having 2 tensors of
-                shape `(batch_size, num_heads, sequence_length, embed_size_per_head)`) and 2 additional tensors of
-                shape `(batch_size, num_heads, encoder_sequence_length, embed_size_per_head)`.
-
-                Contains pre-computed hidden-states (key and values in the self-attention blocks and in the
-                cross-attention blocks) that can be used (see `past_key_values` input) to speed up sequential decoding.
-
-                If `past_key_values` are used, the user can optionally input only the last `decoder_input_ids` (those
-                that don't have their past key value states given to this model) of shape `(batch_size, 1)` instead of
-                all `decoder_input_ids` of shape `(batch_size, sequence_length)`.
-            inputs_embeds (`torch.FloatTensor` of shape `(batch_size, sequence_length, hidden_size)`, *optional*):
-                Optionally, instead of passing `input_ids` you can choose to directly pass an embedded representation.
-                This is useful if you want more control over how to convert `input_ids` indices into associated vectors
-                than the model's internal embedding lookup matrix.
-            output_attentions (`bool`, *optional*):
-                Whether or not to return the attentions tensors of all attention layers. See `attentions` under
-                returned tensors for more detail.
-            output_hidden_states (`bool`, *optional*):
-                Whether or not to return the hidden states of all layers. See `hidden_states` under returned tensors
-                for more detail.
-            return_dict (`bool`, *optional*):
-                Whether or not to return a [`~utils.ModelOutput`] instead of a plain tuple.
-        """
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
-
-        input_shape = inputs_embeds.size()[:-1]
+        input_shape = inputs_embeds.size()[:-1] #torch.Size([64, 24, 22]) batch windows_size num_windows(18)+地点 天气 均值 偏差
 
         # past_key_values_length
         past_key_values_length = past_key_values[0][0].shape[2] if past_key_values is not None else 0
 
         attention_mask = _prepare_4d_causal_attention_mask(
             attention_mask, input_shape, inputs_embeds, past_key_values_length
-        )
+        ) #->torch.Size([64, 1, 24, 24])
 
         # expand encoder attention mask
         if encoder_hidden_states is not None and encoder_attention_mask is not None:
@@ -1337,10 +1289,10 @@ class InformerDecoder(InformerPreTrainedModel):
                 encoder_attention_mask, inputs_embeds.dtype, tgt_len=input_shape[-1]
             )
 
-        hidden_states = self.value_embedding(inputs_embeds)
-        embed_pos = self.embed_positions(inputs_embeds.size(), past_key_values_length=self.config.context_length)
-        hidden_states = self.layernorm_embedding(hidden_states + embed_pos)
-        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training)
+        hidden_states = self.value_embedding(inputs_embeds) #torch.Size([64, 24, 32])
+        embed_pos = self.embed_positions(inputs_embeds.size(), past_key_values_length=self.config.context_length) #torch.Size([24, 32])
+        hidden_states = self.layernorm_embedding(hidden_states + embed_pos) #torch.Size([64, 24, 32])
+        hidden_states = nn.functional.dropout(hidden_states, p=self.dropout, training=self.training) #torch.Size([64, 24, 32])
 
         if self.gradient_checkpointing and self.training:
             if use_cache:
@@ -1364,7 +1316,7 @@ class InformerDecoder(InformerPreTrainedModel):
                         f" {head_mask.size()[0]}."
                     )
 
-        for idx, decoder_layer in enumerate(self.layers):
+        for idx, layer_i in enumerate(self.layers):
             # add LayerDrop (see https://arxiv.org/abs/1909.11556 for description)
             if output_hidden_states:
                 all_hidden_states += (hidden_states,)
@@ -1377,7 +1329,7 @@ class InformerDecoder(InformerPreTrainedModel):
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
-                    decoder_layer.__call__,
+                    layer_i.__call__,
                     hidden_states,
                     attention_mask,
                     encoder_hidden_states,
@@ -1389,18 +1341,18 @@ class InformerDecoder(InformerPreTrainedModel):
                     use_cache,
                 )
             else:
-                layer_outputs = decoder_layer(
-                    hidden_states,
-                    attention_mask=attention_mask,
-                    encoder_hidden_states=encoder_hidden_states,
-                    encoder_attention_mask=encoder_attention_mask,
-                    layer_head_mask=(head_mask[idx] if head_mask is not None else None),
+                layer_outputs = layer_i(
+                    hidden_states, #torch.Size([64, 24, 32])
+                    attention_mask=attention_mask, #torch.Size([64, 1, 24, 24])
+                    encoder_hidden_states=encoder_hidden_states, #torch.Size([64, 3, 32])
+                    encoder_attention_mask=encoder_attention_mask, #none
+                    layer_head_mask=(head_mask[idx] if head_mask is not None else None), #none
                     cross_attn_layer_head_mask=(
                         cross_attn_head_mask[idx] if cross_attn_head_mask is not None else None
-                    ),
-                    past_key_value=past_key_value,
-                    output_attentions=output_attentions,
-                    use_cache=use_cache,
+                    ), #none
+                    past_key_value=past_key_value, #none
+                    output_attentions=output_attentions, #false
+                    use_cache=use_cache, #true
                 )
             hidden_states = layer_outputs[0]
 
@@ -1468,7 +1420,7 @@ class InformerModel(InformerPreTrainedModel):
 
     def get_lagged_subsequences(
         self, sequence: torch.Tensor, subsequences_length: int, shift: int = 0
-    ) -> torch.Tensor:
+    ) -> torch.Tensor: #总序列的值 子序列的长度
         """
         Returns lagged subsequences of a given sequence. Returns a tensor of shape (N, S, C, I),
             where S = subsequences_length and I = len(indices), containing lagged subsequences. Specifically, lagged[i,
@@ -1482,8 +1434,8 @@ class InformerModel(InformerPreTrainedModel):
             shift: int
                 Shift the lags by this amount back.
         """
-        sequence_length = sequence.shape[1]
-        indices = [lag - shift for lag in self.config.lags_sequence]
+        sequence_length = sequence.shape[1] #85 总序列的长度
+        indices = [lag - shift for lag in self.config.lags_sequence] #16 这里的选择必须特别靠前
 
         if max(indices) + subsequences_length > sequence_length:
             raise ValueError(
@@ -1492,7 +1444,7 @@ class InformerModel(InformerPreTrainedModel):
             )
 
         lagged_values = []
-        for lag_index in indices:
+        for lag_index in indices: #16
             begin_index = -lag_index - subsequences_length
             end_index = -lag_index if lag_index > 0 else None
             lagged_values.append(sequence[:, begin_index:end_index, ...])
@@ -1509,7 +1461,7 @@ class InformerModel(InformerPreTrainedModel):
         future_time_features: Optional[torch.Tensor] = None,
     ):
         # time feature
-        time_feat = (
+        time_feat = ( #过去和现在的拼接
             torch.cat(
                 (
                     past_time_features[:, self._past_length - self.config.context_length :, ...],
@@ -1523,41 +1475,41 @@ class InformerModel(InformerPreTrainedModel):
 
         # target
         if past_observed_mask is None:
-            past_observed_mask = torch.ones_like(past_values)
+            past_observed_mask = torch.ones_like(past_values) #过去全部被观察到了
 
-        context = past_values[:, -self.config.context_length :]
-        observed_context = past_observed_mask[:, -self.config.context_length :]
-        _, loc, scale = self.scaler(context, observed_context)
+        context = past_values[:, -self.config.context_length :] #上下文长度
+        observed_context = past_observed_mask[:, -self.config.context_length :] #上下文长度掩膜
+        _, loc, scale = self.scaler(context, observed_context) #torch.Size([64, 24]) torch.Size([64, 24])
 
-        inputs = (
+        inputs = ( #处理后的输入包括过去的值和未来的值
             (torch.cat((past_values, future_values), dim=1) - loc) / scale
             if future_values is not None
             else (past_values - loc) / scale
         )
 
         # static features
-        log_abs_loc = loc.abs().log1p() if self.config.input_size == 1 else loc.squeeze(1).abs().log1p()
-        log_scale = scale.log() if self.config.input_size == 1 else scale.squeeze(1).log()
+        log_abs_loc = loc.abs().log1p() if self.config.input_size == 1 else loc.squeeze(1).abs().log1p() #偏差
+        log_scale = scale.log() if self.config.input_size == 1 else scale.squeeze(1).log() #整体均值
         static_feat = torch.cat((log_abs_loc, log_scale), dim=1)
 
-        if static_real_features is not None:
+        if static_real_features is not None: #天气 整体偏差 整体均值
             static_feat = torch.cat((static_real_features, static_feat), dim=1)
         if static_categorical_features is not None:
-            embedded_cat = self.embedder(static_categorical_features)
-            static_feat = torch.cat((embedded_cat, static_feat), dim=1)
-        expanded_static_feat = static_feat.unsqueeze(1).expand(-1, time_feat.shape[1], -1)
+            embedded_cat = self.embedder(static_categorical_features) #地理位置-》torch.Size([64, 2])
+            static_feat = torch.cat((static_categorical_features, static_feat), dim=1) #地理位置 天气 整体偏差 整体均值 bug
+        expanded_static_feat = static_feat.unsqueeze(1).expand(-1, time_feat.shape[1], -1) #每一个时间点都存在  地理位置 天气 整体偏差 整体均值
 
-        # all features
+        # all features 综合特征了
         features = torch.cat((expanded_static_feat, time_feat), dim=-1)
 
         # lagged features
-        subsequences_length = (
+        subsequences_length = ( #总共的子序列长度是48
             self.config.context_length + self.config.prediction_length
             if future_values is not None
             else self.config.context_length
         )
-        lagged_sequence = self.get_lagged_subsequences(sequence=inputs, subsequences_length=subsequences_length)
-        lags_shape = lagged_sequence.shape
+        lagged_sequence = self.get_lagged_subsequences(sequence=inputs, subsequences_length=subsequences_length) #torch.Size([64, 48, 16]) 构造16对不同的序列窗口
+        lags_shape = lagged_sequence.shape #torch.Size([64, 48, 16])
         reshaped_lagged_sequence = lagged_sequence.reshape(lags_shape[0], lags_shape[1], -1)
 
         if reshaped_lagged_sequence.shape[1] != time_feat.shape[1]:
@@ -1576,6 +1528,22 @@ class InformerModel(InformerPreTrainedModel):
     def get_decoder(self):
         return self.decoder
 
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
+    
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict, use_cache):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        use_cache = use_cache or self.config.use_cache
+        return output_attentions, output_hidden_states, return_dict, use_cache
+    
+    
     @add_start_docstrings_to_model_forward(INFORMER_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=Seq2SeqTSModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -1629,28 +1597,23 @@ class InformerModel(InformerPreTrainedModel):
 
         >>> last_hidden_state = outputs.last_hidden_state
         ```"""
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
-        output_hidden_states = (
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        use_cache = use_cache if use_cache is not None else self.config.use_cache
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        output_attentions, output_hidden_states, return_dict, use_cache = self._handle_params(output_attentions, output_hidden_states, return_dict,use_cache)
 
         transformer_inputs, loc, scale, static_feat = self.create_network_inputs(
-            past_values=past_values,
-            past_time_features=past_time_features,
-            past_observed_mask=past_observed_mask,
-            static_categorical_features=static_categorical_features,
-            static_real_features=static_real_features,
-            future_values=future_values,
-            future_time_features=future_time_features,
-        )
+            past_values=past_values, #torch.Size([64, 61])
+            past_time_features=past_time_features, #torch.Size([64, 61, 2])
+            past_observed_mask=past_observed_mask, #torch.Size([64, 61])
+            static_categorical_features=static_categorical_features, #torch.Size([64, 1])
+            static_real_features=static_real_features, #torch.Size([64, 1])
+            future_values=future_values, #torch.Size([64, 24])
+            future_time_features=future_time_features, #torch.Size([64, 24, 2])
+        ) #-》torch.Size([64, 48, 23]) 23分解成16+5 地理位置2 天气 整体偏差 整体均值
 
         if encoder_outputs is None:
             enc_input = transformer_inputs[:, : self.config.context_length, ...]
             encoder_outputs = self.encoder(
-                inputs_embeds=enc_input,
-                head_mask=head_mask,
+                inputs_embeds=enc_input, #torch.Size([64, 24, 23])
+                head_mask=head_mask, #none
                 output_attentions=output_attentions,
                 output_hidden_states=output_hidden_states,
                 return_dict=return_dict,
@@ -1663,29 +1626,33 @@ class InformerModel(InformerPreTrainedModel):
                 attentions=encoder_outputs[2] if len(encoder_outputs) > 2 else None,
             )
 
-        dec_input = transformer_inputs[:, self.config.context_length :, ...]
+        dec_input = transformer_inputs[:, self.config.context_length :, ...] #torch.Size([64, 24, 22])解码器拿后24个时间点的向量值
         decoder_outputs = self.decoder(
-            inputs_embeds=dec_input,
-            attention_mask=decoder_attention_mask,
-            encoder_hidden_states=encoder_outputs[0],
-            head_mask=decoder_head_mask,
-            cross_attn_head_mask=cross_attn_head_mask,
-            past_key_values=past_key_values,
-            use_cache=use_cache,
-            output_attentions=output_attentions,
-            output_hidden_states=output_hidden_states,
-            return_dict=return_dict,
+            inputs_embeds=dec_input, #torch.Size([64, 24, 22])
+            attention_mask=decoder_attention_mask, #None
+            encoder_hidden_states=encoder_outputs[0], #torch.Size([64, 3, 32])
+            
+            head_mask=decoder_head_mask, #none
+            cross_attn_head_mask=cross_attn_head_mask, #none
+            past_key_values=past_key_values, #none
+
+            output_attentions=output_attentions, #false
+            output_hidden_states=output_hidden_states, #false
+            return_dict=return_dict, #true
+            use_cache=use_cache, #true
         )
 
         if not return_dict:
             return decoder_outputs + encoder_outputs + (loc, scale, static_feat)
 
         return Seq2SeqTSModelOutput(
-            last_hidden_state=decoder_outputs.last_hidden_state,
-            past_key_values=decoder_outputs.past_key_values,
-            decoder_hidden_states=decoder_outputs.hidden_states,
-            decoder_attentions=decoder_outputs.attentions,
-            cross_attentions=decoder_outputs.cross_attentions,
+            decoder_last_hidden_state=decoder_outputs.last_hidden_state,
+            decoder_past_key_values=decoder_outputs.past_key_values,
+            decoder_all_hidden_states=decoder_outputs.hidden_states,
+            decoder_all_attentions=decoder_outputs.attentions,
+            
+            decoder_cross_attentions=decoder_outputs.cross_attentions,
+            
             encoder_last_hidden_state=encoder_outputs.last_hidden_state,
             encoder_all_hidden_states=encoder_outputs.all_hidden_states,
             encoder_all_attentions=encoder_outputs.all_attentions,

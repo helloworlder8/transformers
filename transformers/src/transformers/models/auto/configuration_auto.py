@@ -31,6 +31,7 @@ logger = logging.get_logger(__name__)
 
 CONFIG_MAPPING_NAMES = OrderedDict(
     [
+        ("florence2","Florence2Config"),
         # Add configs here
         ("albert", "AlbertConfig"),
         ("align", "AlignConfig"),
@@ -322,6 +323,7 @@ CONFIG_MAPPING_NAMES = OrderedDict(
 
 MODEL_NAMES_MAPPING = OrderedDict(
     [
+        ("florence2","Florence2"),
         # Add full (and cased) model names here
         ("albert", "ALBERT"),
         ("align", "ALIGN"),
@@ -692,7 +694,7 @@ SPECIAL_MODEL_TYPE_TO_MODULE_NAME = OrderedDict(
 )
 
 
-def model_type_to_module_name(key):
+def model_type_to_module_name(key): #'florence2'
     """Converts a config key to the corresponding module."""
     # Special treatment
     if key in SPECIAL_MODEL_TYPE_TO_MODULE_NAME:
@@ -703,7 +705,7 @@ def model_type_to_module_name(key):
         return key
 
     key = key.replace("-", "_")
-    if key in DEPRECATED_MODELS:
+    if key in DEPRECATED_MODELS: #
         key = f"deprecated.{key}"
 
     return key
@@ -731,14 +733,14 @@ class _LazyConfigMapping(OrderedDict):
         self._extra_content = {}
         self._modules = {}
 
-    def __getitem__(self, key):
+    def __getitem__(self, key): #'florence2'
         if key in self._extra_content:
             return self._extra_content[key]
-        if key not in self._mapping:
+        if key not in self._mapping: #在映射表里面
             raise KeyError(key)
-        value = self._mapping[key]
-        module_name = model_type_to_module_name(key)
-        if module_name not in self._modules:
+        value = self._mapping[key] #'Florence2Config'
+        module_name = model_type_to_module_name(key) #特殊处理
+        if module_name not in self._modules: #在整个模块架构中
             self._modules[module_name] = importlib.import_module(f".{module_name}", "transformers.models")
         if hasattr(self._modules[module_name], value):
             return getattr(self._modules[module_name], value)
@@ -999,25 +1001,13 @@ class AutoConfig:
         >>> unused_kwargs
         {'foo': False}
         ```"""
-        use_auth_token = kwargs.pop("use_auth_token", None)
-        if use_auth_token is not None:
-            warnings.warn(
-                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
-                FutureWarning,
-            )
-            if kwargs.get("token", None) is not None:
-                raise ValueError(
-                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
-                )
-            kwargs["token"] = use_auth_token
-
         kwargs["_from_auto"] = True
         kwargs["name_or_path"] = model_name_or_path
         trust_remote_code = kwargs.pop("trust_remote_code", None)
         code_revision = kwargs.pop("code_revision", None)
 
         config_dict, unused_kwargs = PretrainedConfig.get_config_dict(model_name_or_path, **kwargs)
-        has_remote_code = "auto_map" in config_dict and "AutoConfig" in config_dict["auto_map"]
+        has_remote_code = "auto_map" in config_dict and "AutoConfig" in config_dict["auto_map"] #false
         has_local_code = "model_type" in config_dict and config_dict["model_type"] in CONFIG_MAPPING
         trust_remote_code = resolve_trust_remote_code(
             trust_remote_code, model_name_or_path, has_local_code, has_remote_code

@@ -55,11 +55,11 @@ class DeeBertEncoder(nn.Module):
         all_hidden_states = ()
         all_attentions = ()
         all_highway_exits = ()
-        for i, layer_module in enumerate(self.layer):
+        for i, layer_i in enumerate(self.layer):
             if self.output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
-            layer_outputs = layer_module(
+            layer_outputs = layer_i(
                 hidden_states, attention_mask, head_mask[i], encoder_hidden_states, encoder_attention_mask
             )
             hidden_states = layer_outputs[0]

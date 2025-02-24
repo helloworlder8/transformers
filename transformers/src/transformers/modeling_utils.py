@@ -1156,22 +1156,8 @@ class ModuleUtilsMixin:
 
     def get_head_mask(
         self, head_mask: Optional[Tensor], num_hidden_layers: int, is_attention_chunked: bool = False
-    ) -> Tensor:
-        """
-        Prepare the head mask if needed.
+    ) -> Tensor: #none 12 false
 
-        Args:
-            head_mask (`torch.Tensor` with shape `[num_heads]` or `[num_hidden_layers x num_heads]`, *optional*):
-                The mask indicating if we should keep the heads or not (1.0 for keep, 0.0 for discard).
-            num_hidden_layers (`int`):
-                The number of hidden layers in the model.
-            is_attention_chunked (`bool`, *optional*, defaults to `False`):
-                Whether or not the attentions scores are computed by chunks or not.
-
-        Returns:
-            `torch.Tensor` with shape `[num_hidden_layers x batch x num_heads x seq_length x seq_length]` or list with
-            `[None]` for each layer.
-        """
         if head_mask is not None:
             head_mask = self._convert_head_mask_to_5d(head_mask, num_hidden_layers)
             if is_attention_chunked is True:
@@ -3949,7 +3935,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         return device_map_kwargs
     
     @classmethod 
-    @restore_default_torch_dtype
+    @restore_default_torch_dtype #运行代码的前期操作
     def from_pretrained(
         cls: Type[SpecificPreTrainedModelType],
         model_name_or_path: Optional[Union[str, os.PathLike]],
@@ -4022,17 +4008,6 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         if is_fsdp_enabled():
             low_cpu_mem_usage = True
 
-        if use_auth_token is not None:
-            warnings.warn(
-                "The `use_auth_token` argument is deprecated and will be removed in v5 of Transformers. Please use `token` instead.",
-                FutureWarning,
-            )
-            if token is not None:
-                raise ValueError(
-                    "`token` and `use_auth_token` are both specified. Please set only the argument `token`."
-                )
-            token = use_auth_token
-
         if token is not None and adapter_kwargs is not None and "token" not in adapter_kwargs:
             adapter_kwargs["token"] = token
 
@@ -4051,6 +4026,12 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
         if is_offline_mode() and not local_files_only:
             logger.info("Offline mode: forcing local_files_only=True")
             local_files_only = True
+
+
+
+
+
+
 
 
         """ 获取commit_hash """
@@ -5028,7 +5009,7 @@ class PreTrainedModel(nn.Module, ModuleUtilsMixin, GenerationMixin, PushToHubMix
 
         return BetterTransformer.reverse(self)
 
-    def warn_if_padding_and_no_attention_mask(self, input_ids, attention_mask):
+    def warn_if_padding_and_no_attention_mask(self, input_ids, attention_mask): #torch.Size([1, 4]) torch.Size([1, 4])
         """
         Shows a one-time warning if the input_ids appear to contain padding and no attention mask was given.
         """

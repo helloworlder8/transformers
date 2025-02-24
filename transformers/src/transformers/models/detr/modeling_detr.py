@@ -378,10 +378,10 @@ class DetrConvEncoder(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor, pixel_mask: torch.Tensor):
         # send pixel_values through the model to get list of feature maps
-        features = self.model(pixel_values) if self.config.use_timm_backbone else self.model(pixel_values).feature_maps
+        all_hidden_states = self.model(pixel_values) if self.config.use_timm_backbone else self.model(pixel_values).feature_maps
 
         out = []
-        for feature_map in features:
+        for feature_map in all_hidden_states:
             # downsample pixel_mask to match shape of corresponding feature_map
             mask = nn.functional.interpolate(pixel_mask[None].float(), size=feature_map.shape[-2:]).to(torch.bool)[0]
             out.append((feature_map, mask))
@@ -398,7 +398,7 @@ class DetrConvModel(nn.Module):
         self.conv_encoder = conv_encoder
         self.position_embedding = position_embedding
 
-    def forward(self, pixel_values, pixel_mask):
+    def forward(self, pixel_values, pixel_mask): #torch.Size([1, 3, 800, 1066]) torch.Size([1, 800, 1066])
         # send pixel_values and pixel_mask through backbone to get list of (feature_map, pixel_mask) tuples
         out = self.conv_encoder(pixel_values, pixel_mask)
         pos = []
@@ -1202,6 +1202,14 @@ class DetrModel(DetrPreTrainedModel):
         for name, param in self.backbone.conv_encoder.model.named_parameters():
             param.requires_grad_(True)
 
+    # 本来就有或者从配置中取出
+    def _handle_params(self,output_attentions, output_hidden_states, return_dict):
+        output_attentions = output_attentions or self.config.output_attentions
+        output_hidden_states = output_hidden_states or self.config.output_hidden_states
+        return_dict = return_dict or self.config.use_return_dict
+        return output_attentions, output_hidden_states, return_dict
+    
+    
     @add_start_docstrings_to_model_forward(DETR_INPUTS_DOCSTRING)
     @replace_return_docstrings(output_type=DetrModelOutput, config_class=_CONFIG_FOR_DOC)
     def forward(
@@ -1243,12 +1251,8 @@ class DetrModel(DetrPreTrainedModel):
         >>> last_hidden_states = outputs.last_hidden_state
         >>> list(last_hidden_states.shape)
         [1, 100, 256]
-        ```"""   #终于怕跑到前向传播了
-        output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions #false
-        output_hidden_states = ( #false
-            output_hidden_states if output_hidden_states is not None else self.config.output_hidden_states
-        )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict #true
+        ```""" 
+        output_attentions, output_hidden_states, return_dict = self._handle_params(output_attentions, output_hidden_states, return_dict)
 
         batch_size, num_channels, height, width = pixel_values.shape
         device = pixel_values.device
@@ -1256,9 +1260,6 @@ class DetrModel(DetrPreTrainedModel):
         if pixel_mask is None:
             pixel_mask = torch.ones(((batch_size, height, width)), device=device)
 
-        # First, sent pixel_values + pixel_mask through Backbone to obtain the features
-        # pixel_values should be of shape (batch_size, num_channels, height, width)
-        # pixel_mask should be of shape (batch_size, height, width)
         features, object_queries_list = self.backbone(pixel_values, pixel_mask)
 
         # get final feature map and downsampled mask
@@ -1805,3 +1806,11 @@ class DetrMHAttentionMap(nn.Module):
         weights = nn.functional.softmax(weights.flatten(2), dim=-1).view(weights.size())
         weights = self.dropout(weights)
         return weights
+
+
+__all__ = [
+    "DetrForObjectDetection",
+    "DetrForSegmentation",
+    "DetrModel",
+    "DetrPreTrainedModel",
+]

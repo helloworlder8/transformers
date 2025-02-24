@@ -553,7 +553,7 @@ class RobertaEncoder(nn.Module):
                 use_cache = False
 
         next_decoder_cache = () if use_cache else None
-        for i, layer_module in enumerate(self.layer):
+        for i, layer_i in enumerate(self.layer):
             if output_hidden_states:
                 all_hidden_states = all_hidden_states + (hidden_states,)
 
@@ -562,7 +562,7 @@ class RobertaEncoder(nn.Module):
 
             if self.gradient_checkpointing and self.training:
                 layer_outputs = self._gradient_checkpointing_func(
-                    layer_module.__call__,
+                    layer_i.__call__,
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
@@ -572,7 +572,7 @@ class RobertaEncoder(nn.Module):
                     output_attentions,
                 )
             else:
-                layer_outputs = layer_module(
+                layer_outputs = layer_i(
                     hidden_states,
                     attention_mask,
                     layer_head_mask,
@@ -623,8 +623,8 @@ class RobertaPooler(nn.Module):
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         # We "pool" the model by simply taking the hidden state corresponding
         # to the first token.
-        first_token_tensor = hidden_states[:, 0]
-        pooled_output = self.dense(first_token_tensor)
+        first_token = hidden_states[:, 0]
+        pooled_output = self.dense(first_token)
         pooled_output = self.activation(pooled_output)
         return pooled_output
 

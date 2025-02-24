@@ -462,6 +462,7 @@ MODEL_WITH_LM_HEAD_MAPPING_NAMES = OrderedDict(
 
 MODEL_FOR_CAUSAL_LM_MAPPING_NAMES = OrderedDict(
     [
+        ("florence2", "Florence2ForConditionalGeneration"),
         # Model for Causal LM mapping
         ("bart", "BartForCausalLM"),
         ("bert", "BertLMHeadModel"),

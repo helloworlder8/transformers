@@ -8,6 +8,7 @@ $env:HF_ENDPOINT = "https://hf-mirror.com"
 huggingface-cli download --resume-download Qwen/Qwen3-0.6B --local-dir Qwen/Qwen3-0.6B
 huggingface-cli download --repo-type dataset --resume-download NMiriams/Defective_Tires --local-dir NMiriams/Defective_Tires
 
+hf download openai/whisper-tiny --local-dir openai/whisper-tiny
 
 ./hfd.sh stabilityai/stable-diffusion-xl-base-1.0
 
